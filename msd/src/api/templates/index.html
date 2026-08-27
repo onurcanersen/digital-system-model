@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MSD — Model Setup Data</title>
+<style>
+  :root {
+    --bg: #f6f8fa; --card: #ffffff; --border: #d0d7de; --text: #1f2328;
+    --muted: #57606a; --accent: #0969da; --ok: #1a7f37; --warn: #9a6700; --err: #cf222e;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; background: var(--bg); color: var(--text); }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 8px 0 4px; }
+  .subtitle { color: var(--muted); margin: 0 0 20px; font-size: 14px; }
+  section { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; margin-bottom: 16px; }
+  h2 { font-size: 16px; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+  .step { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+           border-radius: 50%; background: var(--accent); color: #fff; font-size: 13px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+  select { width: 100%; max-width: 380px; padding: 6px 8px; border: 1px solid var(--border);
+           border-radius: 6px; background: #fff; font-size: 14px; }
+  .grid { display: flex; gap: 24px; flex-wrap: wrap; }
+  .grid > div { flex: 1 1 200px; max-width: 380px; }
+  button { padding: 8px 18px; border: none; border-radius: 6px; background: var(--accent); color: #fff;
+           font-size: 14px; cursor: pointer; }
+  button:disabled { background: #8ca1b3; cursor: not-allowed; }
+  .row { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 10px; }
+  th, td { text-align: left; padding: 5px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; }
+  .status-ok, .status-cloned, .status-already_present, .status-present { color: var(--ok); }
+  .status-missing_files, .status-not_cloned, .status-missing { color: var(--warn); }
+  .status-error { color: var(--err); }
+  .result { margin-top: 10px; font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+  .result.error { color: var(--err); }
+  .result .path { font-family: ui-monospace, monospace; background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+  .result h3 { font-size: 13px; color: var(--muted); margin: 10px 0 0; }
+  .units-preview { font-size: 13px; color: var(--muted); margin-top: 10px; }
+  .empty { color: var(--muted); font-size: 13px; font-style: italic; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Model Setup Data</h1>
+  <p class="subtitle">Select a project / platform / version, then run the workflow: its source repositories are cloned and parsed into the MSD JSON artifact by a background task.</p>
+
+  <section>
+    <h2><span class="step">1</span> Selection</h2>
+    <div class="grid">
+      <div>
+        <label for="project">Project</label>
+        <select id="project" disabled><option value="">—</option></select>
+      </div>
+      <div>
+        <label for="platform">Platform</label>
+        <select id="platform" disabled><option value="">—</option></select>
+      </div>
+      <div>
+        <label for="version">Version</label>
+        <select id="version" disabled><option value="">—</option></select>
+      </div>
+    </div>
+    <div class="units-preview" id="units-preview"></div>
+  </section>
+
+  <section>
+    <h2><span class="step">2</span> Run workflow (clone &amp; generate)</h2>
+    <p style="font-size:13px;color:var(--muted);margin:0">
+      Runs as a background task: clones the selected version's unit repositories and
+      generates <code>model_setup_data.json</code> into a per-run workspace
+      (<code>workspace/&lt;task-id&gt;/…</code>). The status below updates while the task runs.
+    </p>
+    <div class="row">
+      <button id="run-btn" disabled>Clone &amp; generate</button>
+    </div>
+    <div id="run-result" class="result"></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const projectSel = $("project"), platformSel = $("platform"), versionSel = $("version");
+const POLL_INTERVAL_MS = 2000;
+const POLL_TIMEOUT_MS = 60 * 60 * 1000;
+
+async function getJSON(url) {
+  const res = await fetch(url);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || res.status + " " + res.statusText);
+  return body;
+}
+
+async function postJSON(url, payload) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || res.status + " " + res.statusText);
+  return body;
+}
+
+function setOptions(sel, options, placeholder) {
+  sel.innerHTML = "";
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = placeholder;
+  sel.appendChild(none);
+  for (const opt of options) {
+    const el = document.createElement("option");
+    el.value = opt.value;
+    el.textContent = opt.label;
+    sel.appendChild(el);
+  }
+}
+
+function selection() {
+  return { project_id: projectSel.value, platform_id: platformSel.value, version_id: versionSel.value };
+}
+
+function complete() {
+  return !!(projectSel.value && platformSel.value && versionSel.value);
+}
+
+function updateButtons() {
+  $("run-btn").disabled = !complete();
+}
+
+function renderUnits(units) {
+  const el = $("units-preview");
+  if (!units || units.length === 0) {
+    el.innerHTML = complete() ? '<span class="empty">No units registered for this selection.</span>' : "";
+    return;
+  }
+  el.textContent = "Units: " + units.map((u) => u.unit_name + " @" + u.version).join(", ");
+}
+
+function renderUnitTable(result, target) {
+  const table = document.createElement("table");
+  table.innerHTML = "<tr><th>Unit</th><th>Version</th><th>Status</th><th>Detail</th></tr>";
+  for (const u of result.units) {
+    const tr = document.createElement("tr");
+    const td1 = document.createElement("td"); td1.textContent = u.unit_name;
+    const td2 = document.createElement("td"); td2.textContent = u.version;
+    const td3 = document.createElement("td");
+    td3.className = "status-" + u.status;
+    td3.textContent = u.status;
+    const td4 = document.createElement("td"); td4.textContent = u.detail || "";
+    tr.append(td1, td2, td3, td4);
+    table.appendChild(tr);
+  }
+  target.appendChild(table);
+}
+
+function showResult(el, ok, html) {
+  el.className = "result" + (ok ? "" : " error");
+  el.innerHTML = html;
+}
+
+function pathLine(prefix, value) {
+  const div = document.createElement("div");
+  div.textContent = prefix + " ";
+  const span = document.createElement("span");
+  span.className = "path";
+  span.textContent = value;
+  div.appendChild(span);
+  return div;
+}
+
+function sectionHeading(text) {
+  const h = document.createElement("h3");
+  h.textContent = text;
+  return h;
+}
+
+function renderRunResult(result, el) {
+  el.className = "result";
+  el.innerHTML = "";
+  if (result.workspace) el.appendChild(pathLine("Workspace:", result.workspace));
+  if (result.clone && Array.isArray(result.clone.units)) {
+    el.appendChild(sectionHeading("Clone"));
+    renderUnitTable(result.clone, el);
+  }
+  if (Array.isArray(result.units)) {
+    el.appendChild(sectionHeading("Parsing"));
+    renderUnitTable({ units: result.units }, el);
+  }
+  if (result.output_path) el.appendChild(pathLine("Output:", result.output_path));
+  const scale = result.scale || {};
+  if (Object.keys(scale).length > 0) {
+    el.appendChild(document.createTextNode("Scale: " + Object.entries(scale).map(([k, v]) => k + "=" + v).join(", ")));
+  }
+  if (result.validation_errors && result.validation_errors.length > 0) {
+    const div = document.createElement("div");
+    div.className = "status-error";
+    div.textContent = "Validation errors: " + result.validation_errors.map((e) => e.reason).join("; ");
+    el.appendChild(div);
+  }
+}
+
+function pollTask(taskId, el, onDone) {
+  const startedAt = Date.now();
+  const timer = setInterval(async () => {
+    if (Date.now() - startedAt > POLL_TIMEOUT_MS) {
+      clearInterval(timer);
+      showResult(el, false, "Task " + taskId + " still not finished after 60 minutes — check that a worker is running.");
+      onDone();
+      return;
+    }
+    try {
+      const body = await getJSON("/api/task/" + encodeURIComponent(taskId));
+      if (body.state === "SUCCESS") {
+        clearInterval(timer);
+        renderRunResult(body.result || {}, el);
+        onDone();
+      } else if (body.state === "FAILURE") {
+        clearInterval(timer);
+        showResult(el, false, "Run failed: " + (body.error || "unknown error"));
+        onDone();
+      } else {
+        showResult(el, true, "Running (state: " + body.state + ", task " + taskId + ")…");
+      }
+    } catch (e) {
+      showResult(el, true, "Waiting (task " + taskId + ")…");
+    }
+  }, POLL_INTERVAL_MS);
+}
+
+$("run-btn").addEventListener("click", async () => {
+  const btn = $("run-btn");
+  const el = $("run-result");
+  btn.disabled = true;
+  showResult(el, true, "Submitting run…");
+  let taskId;
+  try {
+    const body = await postJSON("/api/run", selection());
+    taskId = body.task_id;
+  } catch (e) {
+    showResult(el, false, "Run failed to start: " + e.message);
+    updateButtons();
+    return;
+  }
+  showResult(el, true, "Queued (task " + taskId + ") — waiting for a worker…");
+  pollTask(taskId, el, updateButtons);
+});
+
+async function loadProjects() {
+  try {
+    const body = await getJSON("/api/projects");
+    setOptions(projectSel, body.projects.map((p) => ({ value: p.project_id, label: p.name || p.project_id })), "—");
+    projectSel.disabled = body.projects.length === 0;
+    if (body.projects.length === 0) showResult($("units-preview"), false, "Config management DB is unreachable or has no projects.");
+  } catch (e) {
+    showResult($("units-preview"), false, "Cannot load projects: " + e.message);
+  }
+}
+
+async function loadPlatforms() {
+  platformSel.disabled = true;
+  platformSel.innerHTML = '<option value="">—</option>';
+  versionSel.innerHTML = '<option value="">—</option>';
+  $("units-preview").textContent = "";
+  if (!projectSel.value) return;
+  try {
+    const body = await getJSON("/api/platforms?project_id=" + encodeURIComponent(projectSel.value));
+    setOptions(platformSel, body.platforms.map((p) => ({ value: p.platform_id, label: p.name || p.platform_id })), "—");
+    platformSel.disabled = body.platforms.length === 0;
+  } catch (e) {
+    showResult($("units-preview"), false, "Cannot load platforms: " + e.message);
+  }
+}
+
+async function loadVersions() {
+  versionSel.disabled = true;
+  versionSel.innerHTML = '<option value="">—</option>';
+  $("units-preview").textContent = "";
+  if (!projectSel.value || !platformSel.value) return;
+  try {
+    const body = await getJSON(
+      "/api/versions?project_id=" + encodeURIComponent(projectSel.value) +
+      "&platform_id=" + encodeURIComponent(platformSel.value));
+    setOptions(versionSel, body.versions.map((v) => ({
+      value: v.version_id,
+      label: (v.label || v.version_id) + (v.is_effective ? " (effective)" : ""),
+    })), "—");
+    versionSel.disabled = body.versions.length === 0;
+  } catch (e) {
+    showResult($("units-preview"), false, "Cannot load versions: " + e.message);
+  }
+}
+
+async function loadUnits() {
+  if (!complete()) return;
+  try {
+    const s = selection();
+    const body = await getJSON("/api/units?" + new URLSearchParams(s).toString());
+    renderUnits(body.units);
+  } catch (e) {
+    showResult($("units-preview"), false, "Cannot load units: " + e.message);
+  }
+}
+
+projectSel.addEventListener("change", loadPlatforms);
+platformSel.addEventListener("change", loadVersions);
+versionSel.addEventListener("change", loadUnits);
+[projectSel, platformSel, versionSel].forEach((sel) =>
+  sel.addEventListener("change", () => { $("run-result").innerHTML = ""; updateButtons(); }));
+
+loadProjects();
+updateButtons();
+</script>
+</body>
+</html>

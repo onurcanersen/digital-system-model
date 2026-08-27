@@ -1,0 +1,29 @@
+services:
+  mysql:
+    image: mysql:8
+    container_name: dsm-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: dsm-root
+      MYSQL_DATABASE: cmdb
+      MYSQL_USER: dsm
+      MYSQL_PASSWORD: dsm
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./mysql:/docker-entrypoint-initdb.d:ro
+
+  gitea:
+    image: gitea/gitea:1.22
+    container_name: dsm-gitea
+    environment:
+      GITEA__database__DB_TYPE: sqlite3
+      GITEA__database__PATH: /data/gitea/gitea.db
+      GITEA__security__INSTALL_LOCK: "true"
+      GITEA__security__MIN_PASSWORD_LENGTH: "1"
+      GITEA__service__DISABLE_REGISTRATION: "true"
+      GITEA__server__ROOT_URL: http://gitea:3000/
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./gitea:/dev/gitea:ro
+    command: ["sh", "/dev/gitea/seed.sh"]
