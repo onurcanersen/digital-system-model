@@ -7,14 +7,14 @@ from datetime import datetime
 from typing import Optional
 
 from model.data_source import SourceType
-from model.project_context import AcquisitionContext, AcquisitionError
+from model.project_context import ProjectContext, AcquisitionError
 from model.status import AcquisitionStatus
 from ports.config_management_repository import ConfigManagementAccessError, IConfigManagementRepository
 
 
 @dataclass
-class AcquisitionContextResult:
-    context: Optional[AcquisitionContext]
+class ProjectContextResult:
+    context: Optional[ProjectContext]
     status: AcquisitionStatus
     error: Optional[AcquisitionError] = None
 
@@ -39,7 +39,7 @@ class AcquireProjectContextUseCase:
         project_id: Optional[str] = None,
         platform_id: Optional[str] = None,
         version_id: Optional[str] = None,
-    ) -> AcquisitionContextResult:
+    ) -> ProjectContextResult:
         if project_id is None:
             return self._missing("project_id must be specified")
         if platform_id is None:
@@ -65,8 +65,8 @@ class AcquireProjectContextUseCase:
                     f"version '{version_id}' not found for '{project_id}/{platform_id}'"
                 )
 
-            context = AcquisitionContext(project=project, platform=platform, version=version)
-            return AcquisitionContextResult(context=context, status=AcquisitionStatus.OK)
+            context = ProjectContext(project=project, platform=platform, version=version)
+            return ProjectContextResult(context=context, status=AcquisitionStatus.OK)
 
         except ConfigManagementAccessError as exc:
             error = AcquisitionError(
@@ -75,14 +75,14 @@ class AcquireProjectContextUseCase:
                 reason=str(exc),
                 occurred_at=datetime.now(),
             )
-            return AcquisitionContextResult(context=None, status=AcquisitionStatus.ERROR, error=error)
+            return ProjectContextResult(context=None, status=AcquisitionStatus.ERROR, error=error)
 
     @staticmethod
-    def _missing(reason: str) -> AcquisitionContextResult:
+    def _missing(reason: str) -> ProjectContextResult:
         error = AcquisitionError(
             source_name="config_mgmt_db",
             source_type=SourceType.CONFIG_MGMT_DB.value,
             reason=reason,
             occurred_at=datetime.now(),
         )
-        return AcquisitionContextResult(context=None, status=AcquisitionStatus.MISSING_DATA, error=error)
+        return ProjectContextResult(context=None, status=AcquisitionStatus.MISSING_DATA, error=error)

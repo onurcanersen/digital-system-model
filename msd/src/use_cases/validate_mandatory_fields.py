@@ -7,8 +7,8 @@ from typing import Any, List, Tuple
 
 from model.acquired_file import AcquiredFile
 from model.data_source import DataSourceConfig
-from model.project_context import AcquisitionContext
-from model.topic_entry import TopicEntry
+from model.project_context import ProjectContext
+from model.extracted_topic import ExtractedTopic
 from model.validation import MandatoryFieldRule, ValidationError
 
 
@@ -18,7 +18,7 @@ def _describe(record: Any) -> Tuple[str, str]:
         return record.source_name, record.source_type.value
     if isinstance(record, AcquiredFile):
         return record.unit_name, "source_code_repo"
-    if isinstance(record, TopicEntry):
+    if isinstance(record, ExtractedTopic):
         return record.source_folder, "source_code_repo"
     return type(record).__name__, "unknown"
 
@@ -31,7 +31,7 @@ class ValidateMandatoryFieldsUseCase:
     def __init__(self, rules: List[MandatoryFieldRule]):
         self._rules = rules
 
-    def execute(self, records: List[Any], context: AcquisitionContext) -> List[ValidationError]:
+    def execute(self, records: List[Any], context: ProjectContext) -> List[ValidationError]:
         project_platform = f"{context.project.name}/{context.platform.name}"
         errors: List[ValidationError] = []
 

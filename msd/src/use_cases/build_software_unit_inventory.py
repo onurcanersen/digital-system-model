@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from model.inventory import SoftwareUnitVersionInventory
-from model.project_context import AcquisitionContext
+from model.project_context import ProjectContext
 from ports.config_management_repository import IConfigManagementRepository
 
 
@@ -14,7 +14,7 @@ class BuildSoftwareUnitInventoryUseCase:
     def __init__(self, config_repo: IConfigManagementRepository):
         self._config_repo = config_repo
 
-    def execute(self, context: AcquisitionContext) -> SoftwareUnitVersionInventory:
+    def execute(self, context: ProjectContext) -> SoftwareUnitVersionInventory:
         units = self._config_repo.list_unit_versions(
             context.project.project_id, context.platform.platform_id, context.version.version_id
         )

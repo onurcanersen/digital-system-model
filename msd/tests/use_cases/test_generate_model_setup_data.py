@@ -1,91 +1,111 @@
+"""Tests for GenerateModelSetupDataUseCase — the generate step must reuse previously
+cloned repositories and never reach the source repository itself
+(SRS DSM-MSD req 14-16, 19)."""
+
 import json
-from datetime import datetime
 from pathlib import Path
 from typing import List
 
 from adapters.json_model_setup_data_writer import JsonModelSetupDataWriter
 from fakes.fake_config_management_repository import FakeConfigManagementRepository
 from fakes.fake_source_code_repository import FakeSourceCodeRepository
-from model.acquired_file import AcquiredFile
 from model.inventory import SoftwareUnitVersion
-from model.topic_entry import TopicEntry
+from model.status import AcquisitionStatus
+from model.extracted_topic import ExtractedTopic, TopicRole
 from model.validation import MandatoryFieldRule
 from ports.source_analyzer import ISourceAnalyzer
 from use_cases.acquire_project_context import AcquireProjectContextUseCase
-from use_cases.analyze_source_units import AnalyzeSourceUnitsUseCase
+from use_cases.analyze_software_units import AnalyzeSoftwareUnitsUseCase
 from use_cases.build_software_unit_inventory import BuildSoftwareUnitInventoryUseCase
-from use_cases.fetch_source_files import FetchSourceFilesUseCase
 from use_cases.generate_model_setup_data import GenerateModelSetupDataUseCase
 from use_cases.validate_mandatory_fields import ValidateMandatoryFieldsUseCase
 
 
 class _FakeAnalyzer(ISourceAnalyzer):
-    def extract(self, folder_path: Path, folder_name: str) -> List[TopicEntry]:
-        return [TopicEntry(source_folder=folder_name, name="nav_position", role="pub")]
+    def extract(self, folder_path: Path, folder_name: str) -> List[ExtractedTopic]:
+        return [ExtractedTopic(source_folder=folder_name, name="nav_position", role=TopicRole.PUB)]
 
 
-def test_execute_composes_use_cases_and_round_trips_json(tmp_path):
-    config_repo = FakeConfigManagementRepository(
+class _FakeBuildRunner:
+    def ensure_available(self) -> None:
+        pass
+
+    def regenerate_code(self, unit_dir: Path) -> None:
+        pass
+
+
+def _use_case(source_repo, root: Path, config_repo=None):
+    config_repo = config_repo or FakeConfigManagementRepository(
         unit_versions={"1.0.0": [SoftwareUnitVersion("nav_app", "1.0.0")]}
     )
-    source_repo = FakeSourceCodeRepository(
-        mandatory_files=["Makefile"],
-        clone_results={"nav_app": [AcquiredFile("nav_app", "Makefile", "Makefile", "1.0.0", datetime.now())]},
-    )
-    writer = JsonModelSetupDataWriter(platform_name="nftw", project_name="skywatch", version="1.0.0", selection_dir=tmp_path / "workspace")
-
-    use_case = GenerateModelSetupDataUseCase(
+    return GenerateModelSetupDataUseCase(
         project_context_uc=AcquireProjectContextUseCase(config_repo),
         inventory_uc=BuildSoftwareUnitInventoryUseCase(config_repo),
-        fetch_files_uc=FetchSourceFilesUseCase(source_repo),
-        analyze_uc=AnalyzeSourceUnitsUseCase(_FakeAnalyzer()),
+        source_repo=source_repo,
+        analyze_uc=AnalyzeSoftwareUnitsUseCase(_FakeAnalyzer(), _FakeBuildRunner()),
         validate_uc=ValidateMandatoryFieldsUseCase([MandatoryFieldRule("file_name", "AcquiredFile")]),
-        writer=writer,
+        writer=JsonModelSetupDataWriter(root),
         config_repo=config_repo,
     )
 
-    output_path = tmp_path / "model_setup_data.json"
-    data = use_case.execute(
-        dest_root=tmp_path / "workspace",
-        output_path=output_path,
-        project_id="proj-1",
-        platform_id="plat-1",
-        version_id="1.0.0",
-    )
 
-    assert data.context.project.name == "skywatch"
-    assert [u.unit_name for u in data.inventory.units] == ["nav_app"]
+def _write_cloned_unit(root: Path, unit_name: str, files: dict) -> None:
+    unit_dir = root / unit_name
+    for relative_path, content in files.items():
+        path = unit_dir / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+
+def test_generates_from_previously_cloned_repos_and_writes_json(tmp_path: Path):
+    root = tmp_path / "ws"
+    _write_cloned_unit(root, "nav_app", {"Makefile": "all:\n", "src/nav_app.xml": "<manifest/>"})
+    source_repo = FakeSourceCodeRepository(mandatory_files=["Makefile", "src/nav_app.xml"])
+
+    data = _use_case(source_repo, root).execute(root, tmp_path / "out.json", "proj-1", "plat-1", "1.0.0")
+
+    assert all(f.status == AcquisitionStatus.OK for f in data.acquired_files)
     assert data.validation_errors == []
-    assert data.graph["metadata"]["scale"]["apps"] >= 0
+    assert [u.unit_name for u in data.inventory.units] == ["nav_app"]
+    assert (tmp_path / "out.json").exists()
+    payload = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))
+    assert payload == data.graph
+    assert "context" not in payload and "acquired_files" not in payload
 
-    assert output_path.exists()
-    round_tripped = json.loads(output_path.read_text(encoding="utf-8"))
-    assert round_tripped == data.graph
-    assert "context" not in round_tripped and "acquired_files" not in round_tripped
+
+def test_reports_not_cloned_units_as_errors(tmp_path: Path):
+    root = tmp_path / "ws"  # nothing cloned
+    source_repo = FakeSourceCodeRepository(mandatory_files=["Makefile", "src/nav_app.xml"])
+
+    data = _use_case(source_repo, root).execute(root, tmp_path / "out.json", "proj-1", "plat-1", "1.0.0")
+
+    assert len(data.acquired_files) == 2
+    assert all(f.status == AcquisitionStatus.ERROR for f in data.acquired_files)
+    assert all(
+        "not cloned" in error.message for f in data.acquired_files for error in f.errors
+    )
+    assert (tmp_path / "out.json").exists()
 
 
-def test_execute_raises_when_context_cannot_be_acquired(tmp_path):
+def test_missing_mandatory_file_gets_missing_data_status(tmp_path: Path):
+    root = tmp_path / "ws"
+    _write_cloned_unit(root, "nav_app", {"Makefile": "all:\n"})  # topic manifest absent
+    source_repo = FakeSourceCodeRepository(mandatory_files=["Makefile", "src/nav_app.xml"])
+
+    data = _use_case(source_repo, root).execute(root, tmp_path / "out.json", "proj-1", "plat-1", "1.0.0")
+
+    by_name = {f.file_name: f for f in data.acquired_files}
+    assert by_name["Makefile"].status == AcquisitionStatus.OK
+    assert by_name["nav_app.xml"].status == AcquisitionStatus.MISSING_DATA
+
+
+def test_raises_when_context_cannot_be_acquired(tmp_path: Path):
     config_repo = FakeConfigManagementRepository(platforms=[])
     source_repo = FakeSourceCodeRepository()
-    writer = JsonModelSetupDataWriter(platform_name="nftw", project_name="skywatch", version="1.0.0", selection_dir=tmp_path / "workspace")
-
-    use_case = GenerateModelSetupDataUseCase(
-        project_context_uc=AcquireProjectContextUseCase(config_repo),
-        inventory_uc=BuildSoftwareUnitInventoryUseCase(config_repo),
-        fetch_files_uc=FetchSourceFilesUseCase(source_repo),
-        analyze_uc=AnalyzeSourceUnitsUseCase(_FakeAnalyzer()),
-        validate_uc=ValidateMandatoryFieldsUseCase([]),
-        writer=writer,
-        config_repo=config_repo,
-    )
 
     try:
-        use_case.execute(
-            dest_root=tmp_path / "workspace",
-            output_path=tmp_path / "out.json",
-            project_id="proj-1",
-            platform_id="plat-1",
-            version_id="1.0.0",
+        _use_case(source_repo, tmp_path / "ws", config_repo).execute(
+            tmp_path / "ws", tmp_path / "out.json", "proj-1", "plat-1", "1.0.0"
         )
         assert False, "expected RuntimeError"
     except RuntimeError as exc:

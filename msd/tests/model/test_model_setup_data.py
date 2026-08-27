@@ -3,11 +3,11 @@ from datetime import datetime
 from model.acquired_file import AcquiredFile
 from model.inventory import SoftwareUnitVersion, SoftwareUnitVersionInventory
 from model.model_setup_data import ModelSetupData, ModelSetupDataTopic
-from model.project_context import AcquisitionContext, PlatformRecord, ProjectRecord, VersionRecord
+from model.project_context import ProjectContext, PlatformRecord, ProjectRecord, VersionRecord
 
 
-def _context() -> AcquisitionContext:
-    return AcquisitionContext(
+def _context() -> ProjectContext:
+    return ProjectContext(
         project=ProjectRecord("proj-1", "skywatch"),
         platform=PlatformRecord("plat-1", "proj-1", "nftw"),
         version=VersionRecord("1.0.0", "proj-1", "plat-1", "1.0.0", is_effective=True),

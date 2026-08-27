@@ -5,30 +5,19 @@ so only the manual XML/import strategy is covered.
 Covers the configurable behaviors: the topic manifest is named
 src/<folder_name>.xml (not a fixed name), only imports ending in a
 configured suffix count as "uses" dependencies, dummy-topic names are
-filtered out, and custom_topic_name selects the XML element — all sourced
-from msd.ini via adapters/config.py.
+filtered out, and custom_topic_name selects the XML element — the settings
+come from an explicitly constructed AnalyzerConfig.
 """
 
 from pathlib import Path
 
-import pytest
-
 from adapters.analysis.manual_source_analyzer import ManualSourceAnalyzer
-from adapters.config import ENV_OVERRIDE_VAR, get_config
+from adapters.config import AnalyzerConfig
+from model.extracted_topic import TopicRole
 
 
-@pytest.fixture(autouse=True)
-def _clear_config_cache():
-    get_config.cache_clear()
-    yield
-    get_config.cache_clear()
-
-
-def _write_config(tmp_path: Path, monkeypatch, ini_body: str) -> None:
-    config_path = tmp_path / "runtime.ini"
-    config_path.write_text(ini_body, encoding="utf-8")
-    monkeypatch.setenv(ENV_OVERRIDE_VAR, str(config_path))
-    get_config.cache_clear()
+def _analyzer(**kwargs) -> ManualSourceAnalyzer:
+    return ManualSourceAnalyzer(AnalyzerConfig(**kwargs))
 
 
 def _write_unit(tmp_path: Path, folder_name: str, xml_body: str, java_imports: str = "") -> Path:
@@ -42,101 +31,106 @@ def _write_unit(tmp_path: Path, folder_name: str, xml_body: str, java_imports: s
     return folder
 
 
-def test_extract_finds_pub_and_sub_topics_from_named_manifest(tmp_path, monkeypatch):
-    _write_config(tmp_path, monkeypatch, "[analyzer]\nimport_domain_prefix = a.b.c\ndependency_suffixes = _lib\n")
+def test_extract_finds_pub_and_sub_topics_from_named_manifest(tmp_path):
     folder = _write_unit(
         tmp_path, "nav_app",
         '<unit><topic name="nav_position" role="pub"/><topic name="sensor_data" role="sub"/></unit>',
     )
 
-    entries = ManualSourceAnalyzer().extract(folder, "nav_app")
+    entries = _analyzer(import_domain_prefix="a.b.c", dependency_suffixes=["_lib"]).extract(folder, "nav_app")
 
     roles = {(e.name, e.role) for e in entries}
-    assert ("nav_position", "pub") in roles
-    assert ("sensor_data", "sub") in roles
+    assert ("nav_position", TopicRole.PUB) in roles
+    assert ("sensor_data", TopicRole.SUB) in roles
 
 
-def test_extract_finds_manifest_nested_deeper_than_directly_under_src(tmp_path, monkeypatch):
-    _write_config(tmp_path, monkeypatch, "[analyzer]\n")
+def test_extract_finds_manifest_nested_deeper_than_directly_under_src(tmp_path):
     folder = tmp_path / "nav_app"
     (folder / "src" / "generated").mkdir(parents=True)
     (folder / "src" / "generated" / "nav_app.xml").write_text(
         '<unit><topic name="nav_position" role="pub"/></unit>', encoding="utf-8"
     )
 
-    entries = ManualSourceAnalyzer().extract(folder, "nav_app")
+    entries = _analyzer().extract(folder, "nav_app")
 
-    assert ("nav_position", "pub") in {(e.name, e.role) for e in entries}
+    assert ("nav_position", TopicRole.PUB) in {(e.name, e.role) for e in entries}
 
 
-def test_extract_does_not_find_manifest_named_after_something_else(tmp_path, monkeypatch):
-    _write_config(tmp_path, monkeypatch, "[analyzer]\n")
+def test_extract_does_not_find_manifest_named_after_something_else(tmp_path):
     folder = tmp_path / "nav_app"
     (folder / "src").mkdir(parents=True)
     (folder / "src" / "unit.xml").write_text('<unit><topic name="x" role="pub"/></unit>', encoding="utf-8")
 
-    entries = ManualSourceAnalyzer().extract(folder, "nav_app")
+    entries = _analyzer().extract(folder, "nav_app")
 
     assert entries == []
 
 
-def test_extract_finds_uses_dependency_ending_in_configured_suffix(tmp_path, monkeypatch):
-    _write_config(tmp_path, monkeypatch, "[analyzer]\nimport_domain_prefix = a.b.c\ndependency_suffixes = _lib\n")
+def test_extract_finds_uses_dependency_ending_in_configured_suffix(tmp_path):
     folder = _write_unit(
         tmp_path, "nav_app", "<unit></unit>",
         java_imports="import a.b.c.common_lib.Utils;",
     )
 
-    entries = ManualSourceAnalyzer().extract(folder, "nav_app")
+    entries = _analyzer(import_domain_prefix="a.b.c", dependency_suffixes=["_lib"]).extract(folder, "nav_app")
 
-    assert ("common_lib", "uses") in {(e.name, e.role) for e in entries}
+    assert ("common_lib", TopicRole.USES) in {(e.name, e.role) for e in entries}
 
 
-def test_extract_excludes_import_not_matching_configured_suffix(tmp_path, monkeypatch):
-    _write_config(tmp_path, monkeypatch, "[analyzer]\nimport_domain_prefix = a.b.c\ndependency_suffixes = _lib\n")
+def test_extract_excludes_import_not_matching_configured_suffix(tmp_path):
     folder = _write_unit(
         tmp_path, "nav_app", "<unit></unit>",
         java_imports="import a.b.c.common_utils.Helper;",
     )
 
-    entries = ManualSourceAnalyzer().extract(folder, "nav_app")
+    entries = _analyzer(import_domain_prefix="a.b.c", dependency_suffixes=["_lib"]).extract(folder, "nav_app")
 
     assert entries == []
 
 
-def test_extract_skips_dummy_topics(tmp_path, monkeypatch):
-    _write_config(tmp_path, monkeypatch, "[analyzer]\ndummy_topic_names = DummyTopic\n")
+def test_extract_skips_dummy_topics(tmp_path):
     folder = _write_unit(
         tmp_path, "nav_app",
         '<unit><topic name="DummyTopic" role="pub"/><topic name="real_topic" role="pub"/></unit>',
     )
 
-    entries = ManualSourceAnalyzer().extract(folder, "nav_app")
+    entries = _analyzer(dummy_topic_names=["DummyTopic"]).extract(folder, "nav_app")
 
     names = {e.name for e in entries}
     assert "DummyTopic" not in names
     assert "real_topic" in names
 
 
-def test_extract_uses_configured_custom_topic_name(tmp_path, monkeypatch):
-    _write_config(tmp_path, monkeypatch, "[analyzer]\ncustom_topic_name = mytopic\n")
+def test_extract_uses_configured_custom_topic_name(tmp_path):
     folder = _write_unit(
         tmp_path, "nav_app",
         '<unit><mytopic name="t1" role="pub"/><topic name="ignored" role="pub"/></unit>',
     )
 
-    entries = ManualSourceAnalyzer().extract(folder, "nav_app")
+    entries = _analyzer(custom_topic_name="mytopic").extract(folder, "nav_app")
 
     roles = {(e.name, e.role) for e in entries}
-    assert ("t1", "pub") in roles
+    assert ("t1", TopicRole.PUB) in roles
     assert "ignored" not in {e.name for e in entries}
 
 
-def test_extract_returns_empty_list_when_no_manifest_or_imports(tmp_path, monkeypatch):
-    _write_config(tmp_path, monkeypatch, "[analyzer]\n")
+def test_extract_skips_topics_with_unknown_roles(tmp_path):
+    folder = _write_unit(
+        tmp_path, "nav_app",
+        '<unit><topic name="real_topic" role="pub"/><topic name="weird_topic" role="broadcast"/></unit>',
+    )
+
+    entries = _analyzer().extract(folder, "nav_app")
+
+    names = {e.name for e in entries}
+    assert "weird_topic" not in names
+    assert "real_topic" in names
+
+
+def test_extract_returns_empty_list_when_no_manifest_or_imports(tmp_path):
     folder = tmp_path / "empty_unit"
     folder.mkdir()
 
-    entries = ManualSourceAnalyzer().extract(folder, "empty_unit")
+    entries = _analyzer().extract(folder, "empty_unit")
 
     assert entries == []

@@ -48,7 +48,7 @@ class VersionRecord:
 
 
 @dataclass
-class AcquisitionContext:
+class ProjectContext:
     """The selected project/platform/version an acquisition run operates on (req 5)."""
     project: ProjectRecord
     platform: PlatformRecord

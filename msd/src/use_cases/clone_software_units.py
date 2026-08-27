@@ -1,8 +1,8 @@
-"""Use case: clone source repositories for a selected project/platform/version (SRS DSM-MSD req 13).
+"""Use case: clone the software units' repositories for a selected project/platform/version (SRS DSM-MSD req 13).
 
-Deliberately a standalone step between selection and parsing: it only touches
+Deliberately a standalone step between selection and generating: it only touches
 the source code repository. Units already present at the destination are not
-re-cloned, so a later parse step can reuse previously cloned repositories.
+re-cloned, so a later generate step can reuse previously cloned repositories.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from model.inventory import SoftwareUnitVersion
+from model.status import CloneStatus
 from ports.source_code_repository import (
     ISourceCodeRepository,
     SourceRepoAccessError,
@@ -22,29 +23,25 @@ from ports.source_code_repository import (
 from use_cases.acquire_project_context import AcquireProjectContextUseCase
 from use_cases.build_software_unit_inventory import BuildSoftwareUnitInventoryUseCase
 
-CLONE_STATUS_CLONED = "cloned"
-CLONE_STATUS_ALREADY_PRESENT = "already_present"
-CLONE_STATUS_ERROR = "error"
-
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class CloneUnitResult:
     unit: SoftwareUnitVersion
-    status: str
+    status: CloneStatus
     detail: str = ""
 
     def to_dict(self) -> dict:
         return {
             "unit_name": self.unit.unit_name,
             "version": self.unit.version,
-            "status": self.status,
+            "status": self.status.value,
             "detail": self.detail,
         }
 
 
-class CloneSourceRepositoriesUseCase:
+class CloneSoftwareUnitsUseCase:
     """Clones the inventory's unit repositories into `dest_root/<unit_name>` (req 13),
     skipping units that already have a non-empty checkout there, and recording
     per-unit access/authorization/integrity errors instead of aborting (req 16)."""
@@ -78,14 +75,14 @@ class CloneSourceRepositoriesUseCase:
             if unit_dir.is_dir() and any(unit_dir.iterdir()):
                 logger.info("clone: %s %s already present at %s, skipping", unit.unit_name, unit.version, unit_dir)
                 results.append(
-                    CloneUnitResult(unit=unit, status=CLONE_STATUS_ALREADY_PRESENT, detail=str(unit_dir))
+                    CloneUnitResult(unit=unit, status=CloneStatus.ALREADY_PRESENT, detail=str(unit_dir))
                 )
                 continue
             try:
                 self._source_repo.clone_unit(unit, dest_root)
                 logger.info("clone: %s %s cloned to %s", unit.unit_name, unit.version, unit_dir)
-                results.append(CloneUnitResult(unit=unit, status=CLONE_STATUS_CLONED, detail=str(unit_dir)))
+                results.append(CloneUnitResult(unit=unit, status=CloneStatus.CLONED, detail=str(unit_dir)))
             except (SourceRepoAccessError, SourceRepoAuthError, SourceRepoIntegrityError) as exc:
                 logger.warning("clone: %s %s failed: %s", unit.unit_name, unit.version, exc)
-                results.append(CloneUnitResult(unit=unit, status=CLONE_STATUS_ERROR, detail=str(exc)))
+                results.append(CloneUnitResult(unit=unit, status=CloneStatus.ERROR, detail=str(exc)))
         return results

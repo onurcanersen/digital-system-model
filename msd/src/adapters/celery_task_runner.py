@@ -7,8 +7,7 @@ from celery import states
 from celery.result import AsyncResult
 
 from ports.task_runner import ITaskRunner, TaskStatus
-from tasks.celery_app import celery_app
-from tasks.workflow import run_msd_workflow
+from tasks import celery_app, run_msd_workflow
 
 
 def _failure_message(result) -> str:

@@ -1,11 +1,11 @@
 from fakes.fake_config_management_repository import FakeConfigManagementRepository
 from model.inventory import SoftwareUnitVersion
-from model.project_context import AcquisitionContext, PlatformRecord, ProjectRecord, VersionRecord
+from model.project_context import ProjectContext, PlatformRecord, ProjectRecord, VersionRecord
 from use_cases.build_software_unit_inventory import BuildSoftwareUnitInventoryUseCase
 
 
-def _context() -> AcquisitionContext:
-    return AcquisitionContext(
+def _context() -> ProjectContext:
+    return ProjectContext(
         project=ProjectRecord("proj-1", "skywatch"),
         platform=PlatformRecord("plat-1", "proj-1", "nftw"),
         version=VersionRecord("1.0.0", "proj-1", "plat-1", "1.0.0", is_effective=True),

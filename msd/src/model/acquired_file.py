@@ -27,7 +27,7 @@ class AcquiredFile:
     Only mandatory/manifest files (per ISourceCodeRepository.list_mandatory_files)
     get a record here — the full repository is still cloned to disk for analysis,
     but recording every file in the tree would make this list unbounded for real
-    (non-fixture) source units.
+    (non-fixture) software units.
     """
     unit_name: str
     file_name: str

@@ -11,7 +11,8 @@ Behavior:
     msd.ini's dummy_topic_names).
   - The topic XML element name comes from msd.ini's custom_topic_name
     (default "topic").
-Configurable values are read from msd.ini via adapters/config.py.
+The settings (msd.ini's [analyzer] section, as an AnalyzerConfig) are
+injected at construction by the composition root.
 """
 
 from __future__ import annotations
@@ -22,8 +23,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import List, Optional, Set
 
-from adapters.config import get_config
-from model.topic_entry import TopicEntry
+from adapters.config import AnalyzerConfig
+from model.extracted_topic import ExtractedTopic, TopicRole
 from ports.source_analyzer import ISourceAnalyzer
 
 logger = logging.getLogger(__name__)
@@ -32,8 +33,8 @@ _IMPORT_PATTERN = re.compile(r"^\s*import\s+(?:static\s+)?([^;]+);", re.MULTILIN
 _COMMENT_PATTERN = re.compile(r"//.*?$|/\*.*?\*/", re.MULTILINE | re.DOTALL)
 
 
-def _is_dummy_topic(topic_name: str) -> bool:
-    dummy_names = {name.strip().lower() for name in get_config().analyzer.dummy_topic_names if name.strip()}
+def _is_dummy_topic(topic_name: str, dummy_topic_names: List[str]) -> bool:
+    dummy_names = {name.strip().lower() for name in dummy_topic_names if name.strip()}
     return topic_name.strip().lower() in dummy_names
 
 
@@ -47,30 +48,33 @@ def _find_topic_manifest(folder_path: Path, folder_name: str) -> Optional[Path]:
     return matches[0] if matches else None
 
 
-def _parse_topic_xml(xml_path: Path, folder_name: str) -> List[TopicEntry]:
-    entries: List[TopicEntry] = []
+def _parse_topic_xml(xml_path: Path, folder_name: str, config: AnalyzerConfig) -> List[ExtractedTopic]:
+    entries: List[ExtractedTopic] = []
     try:
         root = ET.parse(xml_path).getroot()
-        topic_tag = get_config().analyzer.custom_topic_name
-        for topic in root.iter(topic_tag):
+        for topic in root.iter(config.custom_topic_name):
             name = topic.get("name")
-            role = topic.get("role")
-            if name and role:
-                if _is_dummy_topic(name):
+            role_attr = topic.get("role")
+            if name and role_attr:
+                try:
+                    role = TopicRole(role_attr.lower())
+                except ValueError:
+                    logger.debug("Skipping topic with unknown role in %s: %s (%s)", xml_path, name, role_attr)
+                    continue
+                if _is_dummy_topic(name, config.dummy_topic_names):
                     logger.debug("Skipping dummy topic in %s: %s", xml_path, name)
                     continue
-                entries.append(TopicEntry(source_folder=folder_name, name=name, role=role.lower()))
+                entries.append(ExtractedTopic(source_folder=folder_name, name=name, role=role))
     except ET.ParseError as exc:
         logger.error("Error parsing XML file %s: %s", xml_path, exc)
     return entries
 
 
-def _parse_java_import_dependencies(project_path: Path) -> Set[str]:
+def _parse_java_import_dependencies(project_path: Path, config: AnalyzerConfig) -> Set[str]:
     dependencies: Set[str] = set()
     if not project_path.exists():
         return dependencies
 
-    config = get_config().analyzer
     domain_prefix = f"{config.import_domain_prefix}." if config.import_domain_prefix else None
     suffixes = tuple(config.dependency_suffixes)
 
@@ -103,15 +107,18 @@ class ManualSourceAnalyzer(ISourceAnalyzer):
     """Extracts topics from a unit's <folder_name>.xml (found recursively under
     src/) and dependencies from its Java imports."""
 
-    def extract(self, folder_path: Path, folder_name: str) -> List[TopicEntry]:
-        entries: List[TopicEntry] = []
+    def __init__(self, config: AnalyzerConfig):
+        self._config = config
+
+    def extract(self, folder_path: Path, folder_name: str) -> List[ExtractedTopic]:
+        entries: List[ExtractedTopic] = []
 
         xml_path = _find_topic_manifest(folder_path, folder_name)
         if xml_path is not None:
-            entries.extend(_parse_topic_xml(xml_path, folder_name))
+            entries.extend(_parse_topic_xml(xml_path, folder_name, self._config))
 
-        for dependency in _parse_java_import_dependencies(folder_path):
+        for dependency in _parse_java_import_dependencies(folder_path, self._config):
             if dependency != folder_name.strip():
-                entries.append(TopicEntry(source_folder=folder_name, name=dependency, role="uses"))
+                entries.append(ExtractedTopic(source_folder=folder_name, name=dependency, role=TopicRole.USES))
 
         return entries

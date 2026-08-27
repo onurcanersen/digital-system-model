@@ -43,7 +43,7 @@ class ISourceCodeRepository(ABC):
     def scan_cloned_unit(self, unit: SoftwareUnitVersion, clone_path: Path) -> List[AcquiredFile]:
         """Collect AcquiredFile records for the mandatory files present under an
         already-cloned unit directory at `clone_path` — no network access.
-        The parse step reuses previously cloned repositories via this method
+        The generate step reuses previously cloned repositories via this method
         instead of re-cloning."""
 
     @abstractmethod

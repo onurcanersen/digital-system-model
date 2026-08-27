@@ -21,16 +21,30 @@ In a terminal, start the worker:
 
 ```bash
 cd msd/src
-python3.9 -m celery -A tasks.celery_app worker --loglevel=info
+celery -A tasks worker --loglevel=info
 ```
 
-In a second terminal, start the API:
+In a second terminal, start the API (either way works):
+
 
 ```bash
-python3.9 msd/src/api/app.py
+cd msd
+flask --app=src/api/app.py run --host 127.0.0.1 --port 8080
 ```
 
 Then open the UI at <http://127.0.0.1:8080>.
+
+### API endpoints
+
+| Method | Path | Description |
+| ------ | ---- | ----------- |
+| GET | `/` | Single-page UI |
+| GET | `/api/projects` | List projects |
+| GET | `/api/projects/<project_id>/platforms` | List platforms for a project |
+| GET | `/api/projects/<project_id>/platforms/<platform_id>/versions` | List versions for a platform |
+| GET | `/api/projects/<project_id>/platforms/<platform_id>/versions/<version_id>/units` | List unit versions for a selection |
+| POST | `/api/run` | Enqueue clone + generate; body `{"project_id", "platform_id", "version_id"}`, returns `202 {"task_id", "status_url"}` |
+| GET | `/api/task/<task_id>` | Task state, result or error |
 
 ## Run the containers
 

@@ -4,6 +4,10 @@ generate their topic manifest and type-support code from an IDL-like
 definition at build time — if that hasn't run yet, ISourceAnalyzer would
 have nothing to scan.
 
+The `find_valid_makefile`/`run_regenerate_code` functions are pure helpers;
+`MakeBuildRunner` is the IBuildRunner adapter that combines them for
+AnalyzeSoftwareUnitsUseCase.
+
 A build's own non-zero exit code is intentionally NOT treated as failure —
 only a timeout, a missing `gmake`, or an unexpected exception are.
 """
@@ -13,20 +17,19 @@ from __future__ import annotations
 import logging
 import subprocess
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
-from adapters.config import get_config
 from adapters.source_code.mandatory_file_catalog import MAKEFILE_RELATIVE_PATH, makefile_has_valid_include
+from ports.build_runner import IBuildRunner
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT_SECONDS = 300
 
 
-def find_valid_makefile(folder_path: Path) -> Optional[Path]:
+def find_valid_makefile(folder_path: Path, patterns: List[str]) -> Optional[Path]:
     """Search recursively (not root-only) for a Makefile whose content
-    matches one of msd.ini's makefile_include_patterns."""
-    patterns = get_config().analyzer.makefile_include_patterns
+    matches one of `patterns` (msd.ini's makefile_include_patterns)."""
     for makefile_path in sorted(folder_path.rglob(MAKEFILE_RELATIVE_PATH)):
         try:
             content = makefile_path.read_text(encoding="utf-8")
@@ -76,3 +79,22 @@ def run_regenerate_code(makefile_path: Path, timeout: int = DEFAULT_TIMEOUT_SECO
         message = f"Unexpected error: {exc}"
         logger.error("%s in %s", message, makefile_dir)
         return False, message
+
+
+class MakeBuildRunner(IBuildRunner):
+    """IBuildRunner backed by `gmake regenerate_code` (msd.ini's
+    makefile_include_patterns decide which Makefiles count as valid)."""
+
+    def __init__(self, makefile_include_patterns: List[str]):
+        self._patterns = makefile_include_patterns
+
+    def ensure_available(self) -> None:
+        if not check_gmake_available():
+            raise RuntimeError("gmake is not available but build execution was requested")
+
+    def regenerate_code(self, unit_dir: Path) -> None:
+        makefile_path = find_valid_makefile(unit_dir, self._patterns)
+        if makefile_path is None:
+            return
+        logger.info("gmake: running regenerate_code for %s (%s)", unit_dir, makefile_path)
+        run_regenerate_code(makefile_path)

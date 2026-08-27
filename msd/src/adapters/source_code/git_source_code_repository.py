@@ -16,7 +16,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 
-from adapters.config import get_config
 from adapters.source_code.mandatory_file_catalog import (
     MAKEFILE_RELATIVE_PATH,
     get_mandatory_files,
@@ -40,23 +39,26 @@ CLONE_TIMEOUT_SECONDS = 300
 class GitSourceCodeRepository(ISourceCodeRepository):
     """Adapter cloning software unit repositories from a git server (the Gitea mock)."""
 
-    def __init__(self, base_url: str, org: str, user: str, password: str):
+    def __init__(self, base_url: str, org: str, user: str, password: str, makefile_include_patterns: List[str]):
         self._base_url = base_url.rstrip("/")
         self._org = org
         self._user = user
         self._password = password
+        self._makefile_include_patterns = makefile_include_patterns
 
     @classmethod
-    def from_data_source_config(cls, config: DataSourceConfig) -> "GitSourceCodeRepository":
+    def from_data_source_config(cls, config: DataSourceConfig, makefile_include_patterns: List[str]) -> "GitSourceCodeRepository":
         """Build a repository from a saved DataSourceConfig (req 4).
 
         Expects connection_address as "<base_url>/<org>" and user_info as
         "<user>:<password>" — matching dev/gitea's seeded defaults
-        (http://localhost:3000/dsm-src, dsm:dsm).
+        (http://localhost:3000/dsm-src, dsm:dsm). `makefile_include_patterns`
+        (msd.ini's analyzer patterns) decides which Makefiles count as found.
         """
         base_url, _, org = config.connection_address.rpartition("/")
         user, _, password = config.user_info.partition(":")
-        return cls(base_url=base_url, org=org, user=user, password=password)
+        return cls(base_url=base_url, org=org, user=user, password=password,
+                   makefile_include_patterns=makefile_include_patterns)
 
     def _clone_url(self, unit_name: str) -> str:
         scheme, _, rest = self._base_url.partition("://")
@@ -87,7 +89,7 @@ class GitSourceCodeRepository(ISourceCodeRepository):
 
     def scan_cloned_unit(self, unit: SoftwareUnitVersion, clone_path: Path) -> List[AcquiredFile]:
         """Collect the mandatory-file records from an already-cloned unit
-        directory (no network access) — used by the parse step to reuse
+        directory (no network access) — used by the generate step to reuse
         previously cloned repositories."""
         acquired: List[AcquiredFile] = []
         now = datetime.now()
@@ -101,8 +103,7 @@ class GitSourceCodeRepository(ISourceCodeRepository):
                 raise SourceRepoIntegrityError(f"Could not read '{relative_path}' for '{unit.unit_name}': {exc}") from exc
 
             if relative_path == MAKEFILE_RELATIVE_PATH:
-                patterns = get_config().analyzer.makefile_include_patterns
-                if not makefile_has_valid_include(content.decode("utf-8", errors="replace"), patterns):
+                if not makefile_has_valid_include(content.decode("utf-8", errors="replace"), self._makefile_include_patterns):
                     logger.debug("Makefile for '%s' lacks a configured include pattern; treating as not found.", unit.unit_name)
                     continue
 

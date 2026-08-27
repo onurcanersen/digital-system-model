@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 
 from model.acquired_file import AcquiredFile
 from model.inventory import SoftwareUnitVersion
-from ports.source_code_repository import ISourceCodeRepository
+from ports.source_code_repository import ISourceCodeRepository, SourceRepoAccessError
 
 
 class FakeSourceCodeRepository(ISourceCodeRepository):
@@ -42,3 +42,23 @@ class FakeSourceCodeRepository(ISourceCodeRepository):
 
     def list_mandatory_files(self, unit_name: str) -> List[str]:
         return list(self._mandatory_files)
+
+
+class DiskCloningSourceCodeRepository(FakeSourceCodeRepository):
+    """Clone that actually writes the unit directory to disk, like the git
+    adapter: each successful clone creates <unit>/Makefile and
+    <unit>/src/<unit>.xml under dest_dir. Units in `fail_units` raise
+    SourceRepoAccessError instead."""
+
+    def __init__(self, fail_units=(), mandatory_files: Optional[List[str]] = None):
+        super().__init__(mandatory_files=mandatory_files)
+        self._fail_units = set(fail_units)
+
+    def clone_unit(self, unit: SoftwareUnitVersion, dest_dir: Path) -> List[AcquiredFile]:
+        if unit.unit_name in self._fail_units:
+            raise SourceRepoAccessError(f"cannot clone '{unit.unit_name}'")
+        unit_dir = dest_dir / unit.unit_name
+        (unit_dir / "src").mkdir(parents=True, exist_ok=True)
+        (unit_dir / "Makefile").write_text("all:\n", encoding="utf-8")
+        (unit_dir / "src" / f"{unit.unit_name}.xml").write_text("<manifest/>", encoding="utf-8")
+        return super().clone_unit(unit, dest_dir)

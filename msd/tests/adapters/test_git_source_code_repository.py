@@ -1,5 +1,5 @@
 """Pure unit test for mandatory_file_catalog.py's Makefile content-pattern
-check (used by both git_source_code_repository.py and build_runner.py) — no
+check (used by both git_source_code_repository.py and make_build_runner.py) — no
 subprocess/git mocking needed (real git behavior stays manually verified,
 not automated)."""
 

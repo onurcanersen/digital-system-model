@@ -2,14 +2,14 @@ from datetime import datetime
 
 from model.acquired_file import AcquiredFile
 from model.data_source import DataSourceConfig, SourceType
-from model.project_context import AcquisitionContext, PlatformRecord, ProjectRecord, VersionRecord
-from model.topic_entry import TopicEntry
+from model.project_context import ProjectContext, PlatformRecord, ProjectRecord, VersionRecord
+from model.extracted_topic import ExtractedTopic, TopicRole
 from model.validation import MandatoryFieldRule
 from use_cases.validate_mandatory_fields import ValidateMandatoryFieldsUseCase
 
 
-def _context() -> AcquisitionContext:
-    return AcquisitionContext(
+def _context() -> ProjectContext:
+    return ProjectContext(
         project=ProjectRecord("proj-1", "skywatch"),
         platform=PlatformRecord("plat-1", "proj-1", "nftw"),
         version=VersionRecord("1.0.0", "proj-1", "plat-1", "1.0.0", is_effective=True),
@@ -26,8 +26,8 @@ def test_valid_records_produce_no_errors():
 
 
 def test_missing_field_produces_validation_error_with_required_shape():
-    rules = [MandatoryFieldRule("name", "TopicEntry")]
-    record = TopicEntry(source_folder="nav_app", name="", role="pub")
+    rules = [MandatoryFieldRule("name", "ExtractedTopic")]
+    record = ExtractedTopic(source_folder="nav_app", name="", role=TopicRole.PUB)
 
     errors = ValidateMandatoryFieldsUseCase(rules).execute([record], _context())
 
@@ -42,9 +42,9 @@ def test_missing_field_produces_validation_error_with_required_shape():
 
 def test_rule_only_applies_to_its_record_type():
     rules = [MandatoryFieldRule("user_info", "DataSourceConfig")]
-    topic_entry = TopicEntry(source_folder="nav_app", name="", role="pub")
+    extracted_topic = ExtractedTopic(source_folder="nav_app", name="", role=TopicRole.PUB)
 
-    errors = ValidateMandatoryFieldsUseCase(rules).execute([topic_entry], _context())
+    errors = ValidateMandatoryFieldsUseCase(rules).execute([extracted_topic], _context())
 
     assert errors == []
 

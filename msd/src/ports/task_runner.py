@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Dict, Optional
 
@@ -17,13 +18,13 @@ class TaskStatus:
     error: Optional[str] = None
 
 
-class ITaskRunner:
+class ITaskRunner(ABC):
+    @abstractmethod
     def submit_run(self, project_id: str, platform_id: str, version_id: str) -> str:
         """Queue one clone → generate execution for a selection. Returns the
         task id; raises if the execution backend is unreachable."""
-        raise NotImplementedError
 
+    @abstractmethod
     def status(self, task_id: str) -> TaskStatus:
         """Current state/result of a submitted execution. Unknown ids report
         as PENDING (the backend cannot distinguish unknown from queued)."""
-        raise NotImplementedError

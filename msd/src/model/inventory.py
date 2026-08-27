@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List
 
-from model.project_context import AcquisitionContext
+from model.project_context import ProjectContext
 
 
 @dataclass
@@ -21,8 +21,8 @@ class SoftwareUnitVersion:
 
 @dataclass
 class SoftwareUnitVersionInventory:
-    """The recorded inventory of software units for one AcquisitionContext (req 10-11)."""
-    context: AcquisitionContext
+    """The recorded inventory of software units for one ProjectContext (req 10-11)."""
+    context: ProjectContext
     units: List[SoftwareUnitVersion] = field(default_factory=list)
 
     def with_candidate(self, unit_name: str, candidate_version: str) -> "SoftwareUnitVersionInventory":

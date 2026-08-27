@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from model.acquired_file import AcquiredFile
 from model.inventory import SoftwareUnitVersionInventory
-from model.project_context import AcquisitionContext
+from model.project_context import ProjectContext
 from model.validation import ValidationError
 
 
@@ -42,7 +42,7 @@ class ModelSetupData:
     req 2: accept the Model Setup Data produced by the Model Setup Data
     Generation component).
     """
-    context: AcquisitionContext
+    context: ProjectContext
     inventory: SoftwareUnitVersionInventory
     acquired_files: List[AcquiredFile]
     graph: Dict[str, Any]

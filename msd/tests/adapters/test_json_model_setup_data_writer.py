@@ -78,7 +78,7 @@ def _build_apps(app_role_map=None, app_criticality_map=None):
     app_node_rel = [("App-0", "Node-0"), ("App-1", "Node-1"), ("App-2", "Node-0")]
     apps, *_ = _create_apps_libs_and_relations(
         app_node_relations=app_node_rel,
-        topic_entries=[],
+        extracted_topics=[],
         topic_map={},
         app_role_map=app_role_map or {},
         app_criticality_map=app_criticality_map or {},

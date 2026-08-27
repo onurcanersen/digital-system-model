@@ -4,8 +4,8 @@ to JSON (SRS DSM-MSD req 19).
 The topic/QoS data already arrives DDS-formatted (both the mock
 TypeSupportParser and the real generated TypeSupport files use DDS strings
 directly), so there is no custom-to-DDS QoS conversion layer, and topic
-pub/sub/uses entries are consumed in-memory — AnalyzeSourceUnitsUseCase
-already produces them as TopicEntry objects, so no CSV round-trip is needed.
+pub/sub/uses entries are consumed in-memory — AnalyzeSoftwareUnitsUseCase
+already produces them as ExtractedTopic objects, so no CSV round-trip is needed.
 
 Calls system_repo_parser.py and type_support_parser.py directly for
 enrichment — neither maps to one of the four SRS-named external-source ports
@@ -25,8 +25,10 @@ from adapters.analysis.type_support_parser import TypeSupportParser
 from model.system_hierarchy import SystemHierarchyRecord
 from model.inventory import SoftwareUnitVersionInventory
 from model.model_setup_data import ModelSetupData, ModelSetupDataTopic
-from model.topic_entry import TopicEntry
+from model.project_context import ProjectContext
+from model.extracted_topic import ExtractedTopic, TopicRole
 from ports.config_management_repository import IConfigManagementRepository
+from ports.model_setup_data_writer import IModelSetupDataWriter
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +115,7 @@ def _create_topics(topic_set: Set[ModelSetupDataTopic]) -> Tuple[List[Dict[str, 
 
 def _create_apps_libs_and_relations(
     app_node_relations: List[Tuple[str, str]],
-    topic_entries: List[TopicEntry],
+    extracted_topics: List[ExtractedTopic],
     topic_map: Dict[str, str],
     app_role_map: Dict[str, List[str]],
     app_criticality_map: Dict[str, bool],
@@ -123,8 +125,8 @@ def _create_apps_libs_and_relations(
     app_names: Set[str] = {app for app, _ in app_node_relations}
     lib_names: Set[str] = set()
 
-    for entry in topic_entries:
-        if entry.role == "uses" and entry.source_folder in app_names and entry.name not in app_names:
+    for entry in extracted_topics:
+        if entry.role == TopicRole.USES and entry.source_folder in app_names and entry.name not in app_names:
             lib_names.add(entry.name)
 
     sorted_app_names = sorted(app_names)
@@ -146,14 +148,14 @@ def _create_apps_libs_and_relations(
     subscribes_to: List[Dict[str, str]] = []
     uses: List[Dict[str, str]] = []
 
-    for entry in topic_entries:
+    for entry in extracted_topics:
         source_id = app_map.get(entry.source_folder) or lib_map.get(entry.source_folder)
         if not source_id:
             continue
-        if entry.role in ("pub", "sub") and entry.name in topic_map:
+        if entry.role in (TopicRole.PUB, TopicRole.SUB) and entry.name in topic_map:
             relation = {"from": source_id, "to": topic_map[entry.name]}
-            (publishes_to if entry.role == "pub" else subscribes_to).append(relation)
-        elif entry.role == "uses":
+            (publishes_to if entry.role == TopicRole.PUB else subscribes_to).append(relation)
+        elif entry.role == TopicRole.USES:
             target_id = lib_map.get(entry.name) or app_map.get(entry.name)
             if target_id:
                 uses.append({"from": source_id, "to": target_id})
@@ -176,7 +178,7 @@ def _create_apps_libs_and_relations(
     return applications, libs, publishes_to, subscribes_to, uses
 
 
-class JsonModelSetupDataWriter:
+class JsonModelSetupDataWriter(IModelSetupDataWriter):
     """Adapter implementing IModelSetupDataWriter, plus the graph-building
     step GenerateModelSetupDataUseCase calls before constructing ModelSetupData.
 
@@ -185,20 +187,20 @@ class JsonModelSetupDataWriter:
     acquisition data stays on the in-memory ModelSetupData and on the
     caller's response, not on disk."""
 
-    def __init__(self, platform_name: str, project_name: str, version: str, selection_dir: Path):
-        self._platform_name = platform_name
-        self._project_name = project_name
-        self._version = version
+    def __init__(self, selection_dir: Path):
         self._selection_dir = selection_dir
 
     def build_graph(
         self,
+        context: ProjectContext,
         inventory: SoftwareUnitVersionInventory,
-        topic_entries: List[TopicEntry],
+        extracted_topics: List[ExtractedTopic],
         config_repo: IConfigManagementRepository,
     ) -> Dict[str, Any]:
         """Build the nodes/topics/applications/libraries/relationships payload."""
-        system_repo = SystemRepoParser(self._selection_dir, self._project_name, self._platform_name)
+        system_repo = SystemRepoParser(
+            self._selection_dir, context.project.name, context.platform.name
+        )
         type_support = TypeSupportParser(self._selection_dir)
 
         app_node_relations = system_repo.get_app_node_relation()
@@ -214,7 +216,7 @@ class JsonModelSetupDataWriter:
         nodes, _node_map = _create_nodes(app_node_relations)
         topics, topic_map = _create_topics(topic_set)
         applications, libs, publishes_to, subscribes_to, uses = _create_apps_libs_and_relations(
-            app_node_relations, topic_entries, topic_map, app_role_map,
+            app_node_relations, extracted_topics, topic_map, app_role_map,
             app_criticality_map, unit_versions, system_hierarchy_by_unit,
         )
 
