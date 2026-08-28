@@ -7,7 +7,7 @@ from celery import states
 from celery.result import AsyncResult
 
 from ports.task_runner import ITaskRunner, TaskStatus
-from worker import run_msd_workflow
+from worker import celery_app, run_msd_workflow
 
 
 def _failure_message(result) -> str:
@@ -22,12 +22,18 @@ def _failure_message(result) -> str:
 
 
 class CeleryTaskRunner(ITaskRunner):
+    def __init__(self, app=None):
+        # Celery resolves the app for AsyncResult from a thread-local
+        # current-app, which is unset in Flask request threads and would
+        # fall back to an unconfigured default app (disabled backend).
+        self.app = app or celery_app
+
     def submit_run(self, project_id: str, platform_id: str, version_id: str) -> str:
         async_result = run_msd_workflow.delay(project_id, platform_id, version_id)
         return async_result.id
 
     def status(self, task_id: str) -> TaskStatus:
-        async_result = AsyncResult(task_id)
+        async_result = AsyncResult(task_id, app=self.app)
         state = async_result.state
         if state == states.FAILURE:
             return TaskStatus(task_id=task_id, state=state, error=_failure_message(async_result.result))
