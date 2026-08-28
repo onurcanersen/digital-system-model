@@ -10,7 +10,7 @@ from adapters.json_model_setup_data_writer import (
     _derive_topic_criticality,
     _derive_topic_frequency,
 )
-from model.model_setup_data import ModelSetupDataTopic
+from domain.model_setup_data import ModelSetupDataTopic
 
 
 # --- _derive_topic_frequency ------------------------------------------------

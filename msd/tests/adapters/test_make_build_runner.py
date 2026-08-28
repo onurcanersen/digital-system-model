@@ -2,7 +2,7 @@
 (no gmake needed); run_regenerate_code actually shells out to gmake, so it's
 only exercised when gmake is available in the test environment
 (environment-dependent tools are skipped, not mocked — no integration
-tests). The makefile include patterns are passed explicitly (no msd.ini)."""
+tests). The makefile include patterns are passed explicitly (no config.ini)."""
 
 import pytest
 

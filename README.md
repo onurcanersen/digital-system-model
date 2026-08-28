@@ -17,20 +17,29 @@ pip install -r requirements.txt
 
 ## Start MSD
 
-In a terminal, start the worker:
-
-```bash
-cd msd/src
-celery -A tasks worker --loglevel=info
-```
-
-In a second terminal, start the API (either way works):
-
+In one terminal, start the worker:
 
 ```bash
 cd msd
-flask --app=src/api/app.py run --host 127.0.0.1 --port 8080
+python worker.py
 ```
+
+Optional: set the worker process count with `-c`/`--concurrency`
+(default is the CPU count, as per Celery):
+
+```bash
+cd msd
+python worker.py -c 4
+```
+
+In a second terminal, start the API:
+
+```bash
+cd msd
+python api.py
+```
+
+Both read the same `config.ini` (worker: `[worker]`, API: `[api]`).
 
 Then open the UI at <http://127.0.0.1:8080>.
 
@@ -44,7 +53,7 @@ Then open the UI at <http://127.0.0.1:8080>.
 | GET | `/api/projects/<project_id>/platforms/<platform_id>/versions` | List versions for a platform |
 | GET | `/api/projects/<project_id>/platforms/<platform_id>/versions/<version_id>/units` | List unit versions for a selection |
 | POST | `/api/run` | Enqueue clone + generate; body `{"project_id", "platform_id", "version_id"}`, returns `202 {"task_id", "status_url"}` |
-| GET | `/api/task/<task_id>` | Task state, result or error |
+| GET | `/api/tasks/<task_id>` | Task state, result or error |
 
 ## Run the containers
 

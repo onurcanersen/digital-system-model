@@ -9,7 +9,7 @@ import pytest
 from composition import Components
 from fakes.fake_config_management_repository import FakeConfigManagementRepository
 from fakes.fake_source_code_repository import DiskCloningSourceCodeRepository, FakeSourceCodeRepository
-from model.inventory import SoftwareUnitVersion
+from domain.inventory import SoftwareUnitVersion
 from ports.config_management_repository import ConfigManagementAccessError
 
 
@@ -27,7 +27,7 @@ def _components(tmp_path: Path, source_repo: FakeSourceCodeRepository = None, **
 
 def _run(components: Components, task_id: str, project_id: str, platform_id: str, version_id: str) -> dict:
     """One workflow run in a task-keyed workspace root, as the Celery task does."""
-    return components.workflow_uc().execute(
+    return components.workflow().execute(
         components.workspace / task_id, project_id, platform_id, version_id
     ).to_dict()
 

@@ -6,8 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from model.acquired_file import AcquiredFile
-from model.inventory import SoftwareUnitVersion
+from domain.acquired_file import AcquiredFile
+from domain.inventory import SoftwareUnitVersion
 from ports.source_code_repository import ISourceCodeRepository, SourceRepoAccessError
 
 
