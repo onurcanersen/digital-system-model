@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from composition import Components
+from msd.composition import Components
 from fakes.fake_config_management_repository import FakeConfigManagementRepository
 from fakes.fake_source_code_repository import DiskCloningSourceCodeRepository, FakeSourceCodeRepository
-from domain.inventory import SoftwareUnitVersion
-from ports.config_management_repository import ConfigManagementAccessError
+from msd.domain.inventory import SoftwareUnitVersion
+from msd.ports.config_management_repository import ConfigManagementAccessError
 
 
 def _components(tmp_path: Path, source_repo: FakeSourceCodeRepository = None, **config_repo_kwargs) -> Components:

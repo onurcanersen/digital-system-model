@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "msd"
+version = "0.1.0"
+description = "DSM-MSD: Model Setup Data Generation (library — no API/worker of its own; see vae)"
+requires-python = ">=3.9"
+dependencies = [
+    "PyMySQL==1.0.3",
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+msd = ["config.ini"]

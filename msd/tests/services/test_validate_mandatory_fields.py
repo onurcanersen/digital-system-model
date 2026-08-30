@@ -1,11 +1,11 @@
 from datetime import datetime
 
-from domain.acquired_file import AcquiredFile
-from domain.data_source import DataSourceConfig, SourceType
-from domain.project_context import ProjectContext, PlatformRecord, ProjectRecord, VersionRecord
-from domain.extracted_topic import ExtractedTopic, TopicRole
-from domain.validation import MandatoryFieldRule
-from services.validate_mandatory_fields import ValidateMandatoryFields
+from msd.domain.acquired_file import AcquiredFile
+from msd.domain.data_source import DataSourceConfig, SourceType
+from msd.domain.project_context import ProjectContext, PlatformRecord, ProjectRecord, VersionRecord
+from msd.domain.extracted_topic import ExtractedTopic, TopicRole
+from msd.domain.validation import MandatoryFieldRule
+from msd.services.validate_mandatory_fields import ValidateMandatoryFields
 
 
 def _context() -> ProjectContext:

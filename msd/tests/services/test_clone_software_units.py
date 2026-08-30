@@ -4,11 +4,11 @@ from pathlib import Path
 
 from fakes.fake_config_management_repository import FakeConfigManagementRepository
 from fakes.fake_source_code_repository import DiskCloningSourceCodeRepository
-from domain.inventory import SoftwareUnitVersion
-from domain.status import CloneStatus
-from services.acquire_project_context import AcquireProjectContext
-from services.build_software_unit_inventory import BuildSoftwareUnitInventory
-from services.clone_software_units import CloneSoftwareUnits
+from msd.domain.inventory import SoftwareUnitVersion
+from msd.domain.status import CloneStatus
+from msd.services.acquire_project_context import AcquireProjectContext
+from msd.services.build_software_unit_inventory import BuildSoftwareUnitInventory
+from msd.services.clone_software_units import CloneSoftwareUnits
 
 
 def _use_case(source_repo, config_repo=None):

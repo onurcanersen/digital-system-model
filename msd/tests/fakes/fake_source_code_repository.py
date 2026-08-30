@@ -6,9 +6,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from domain.acquired_file import AcquiredFile
-from domain.inventory import SoftwareUnitVersion
-from ports.source_code_repository import ISourceCodeRepository, SourceRepoAccessError
+from msd.domain.acquired_file import AcquiredFile
+from msd.domain.inventory import SoftwareUnitVersion
+from msd.ports.source_code_repository import ISourceCodeRepository, SourceRepoAccessError
 
 
 class FakeSourceCodeRepository(ISourceCodeRepository):

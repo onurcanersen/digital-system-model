@@ -1,0 +1,1107 @@
+<!doctype html>
+<html lang="en" data-bs-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Digital System Model</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon-32x32.png') }}">
+  <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='favicon-16x16.png') }}">
+  <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <style>
+    :root {
+      --cyan: #35e7ff;
+      --navy-deep: #04070d;
+    }
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: var(--navy-deep);
+      overflow: hidden;
+      font-family: 'Orbitron', sans-serif;
+    }
+
+    .hero {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      height: 100svh;
+      overflow: hidden;
+      background: var(--navy-deep);
+      perspective: 1400px;
+      opacity: 0;
+    }
+
+    @media (max-width: 700px), (max-aspect-ratio: 1/1) {
+      .hero { height: min(100svh, 78vw); }
+    }
+
+    .hero__stage {
+      position: absolute; inset: 0;
+      transform-style: preserve-3d;
+      backface-visibility: hidden;
+      will-change: transform;
+    }
+
+    .layer-parallax, .layer-idle {
+      position: absolute; inset: 0;
+      will-change: transform;
+    }
+
+    .layer-idle--bg   { transform: scale(1.1); transform-origin: 50% 50%; }
+    .layer-idle--ship { transform: scale(1.02); transform-origin: 50% 50%; }
+
+    .layer__img {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: cover;
+      object-position: 50% 50%;
+      pointer-events: none;
+      user-select: none;
+      display: block;
+    }
+
+    .scanline {
+      position: absolute; top: 0; right: 0; width: 50%; height: 100%;
+      overflow: hidden; pointer-events: none;
+    }
+    .scanline__bar {
+      position: absolute; top: 0; bottom: 0; width: 2px;
+      left: 0%;
+      background: linear-gradient(180deg,
+        transparent, rgba(53,231,255,.9) 10%, #f0feff 50%, rgba(53,231,255,.9) 90%, transparent);
+      mix-blend-mode: screen;
+      box-shadow: 0 0 8px 2px rgba(53,231,255,.9), 0 0 30px 6px rgba(53,231,255,.45);
+      opacity: 0;
+    }
+    .scanline__bar::before,
+    .scanline__bar::after {
+      content: '';
+      position: absolute; left: 50%; width: 24px; height: 2px;
+      background: rgba(53,231,255,.95);
+      box-shadow: 0 0 8px 1px rgba(53,231,255,.85);
+      transform: translateX(-50%);
+    }
+    .scanline__bar::before { top: 0; }
+    .scanline__bar::after { bottom: 0; }
+
+    .wire-glow {
+      position: absolute; top: 50%; left: 75%; width: 46%; height: 70%;
+      transform: translate(-50%, -50%);
+      background: radial-gradient(closest-side, rgba(53,231,255,.22), transparent 70%);
+      pointer-events: none; mix-blend-mode: screen;
+    }
+
+    .particles {
+      position: absolute; top: 0; right: 0; width: 50%; height: 100%;
+      overflow: hidden; pointer-events: none;
+    }
+    .particle {
+      position: absolute; width: 6px; height: 6px; border-radius: 50%;
+      background: var(--cyan); box-shadow: 0 0 10px 2px rgba(53,231,255,.9); opacity: 0;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .scanline, .particles { display: none; }
+    }
+
+    .login-card {
+      isolation: isolate;
+      max-width: 20rem;
+      overflow: hidden;
+      padding-top: 2.25rem;
+      box-shadow:
+        0 0 0 1px rgba(53,231,255,.06),
+        0 0 60px -12px rgba(53,231,255,.35),
+        0 30px 60px -30px rgba(0,0,0,.8);
+    }
+    @media (min-width: 576px) {
+      .login-card { padding-top: 4rem; }
+    }
+    @keyframes login-shake {
+      0%, 100% { transform: translateX(0); }
+      20% { transform: translateX(-3px); }
+      40% { transform: translateX(3px); }
+      60% { transform: translateX(-2px); }
+      80% { transform: translateX(2px); }
+    }
+    .login-card.shake {
+      animation: login-shake .9s ease-in-out both;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .login-card.shake { animation: none; }
+      .login-card::before { animation: none; }
+      .login-card__blur-img { animation: none; }
+    }
+    .login-card__blur {
+      position: absolute; inset: 0; z-index: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    @keyframes card-blur-drift {
+      0%, 100% { transform: scale(1.25) translate(0, 0); }
+      50% { transform: scale(1.25) translate(-2.5%, 2%); }
+    }
+    .login-card__blur-img {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: cover;
+      object-position: 50% 50%;
+      filter: blur(28px) saturate(115%) brightness(.75);
+      transform: scale(1.25);
+      animation: card-blur-drift 18s ease-in-out infinite;
+    }
+    .login-card__blur-img:nth-child(2) {
+      animation-duration: 24s;
+      animation-direction: reverse;
+    }
+    .login-card__tint {
+      position: absolute; inset: 0; z-index: 1;
+      background: rgba(4,7,13,.12);
+      pointer-events: none;
+    }
+    .login-card__content { z-index: 3; }
+    @keyframes card-border-pulse {
+      0%, 100% { opacity: .5; filter: drop-shadow(0 0 0 rgba(53,231,255,0)); }
+      50% { opacity: 1; filter: drop-shadow(0 0 10px rgba(53,231,255,.65)); }
+    }
+    .login-card::before {
+      content: '';
+      position: absolute; inset: 0; z-index: 2; border-radius: inherit; padding: 3px;
+      background: linear-gradient(135deg, rgba(53,231,255,1), rgba(53,231,255,0) 30%, rgba(53,231,255,0) 70%, rgba(53,231,255,.75));
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor;
+      mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      mask-composite: exclude;
+      pointer-events: none;
+      animation: card-border-pulse 3s ease-in-out infinite;
+    }
+
+    .login-icon {
+      height: 6rem;
+      width: 6rem;
+      filter: drop-shadow(0 0 14px rgba(53,231,255,.55));
+    }
+    .login-icon--bi {
+      height: auto;
+      width: auto;
+      font-size: 5.5rem;
+      line-height: 1;
+      color: var(--cyan);
+    }
+    .login-title {
+      font-size: 1.25rem;
+      letter-spacing: .025em;
+    }
+    .login-subtitle {
+      font-size: .75rem;
+      letter-spacing: .2em;
+      color: rgba(103,232,249,.6);
+    }
+
+    @keyframes error-fade-in {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .login-error {
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+      padding: .5rem .75rem;
+      border-radius: .5rem;
+      background: rgba(255,71,87,.08);
+      border: 1px solid rgba(255,71,87,.35);
+      box-shadow: 0 0 16px -6px rgba(255,71,87,.5);
+      color: #ff8095;
+      font-size: .7rem;
+      letter-spacing: .03em;
+      line-height: 1.3;
+      text-align: left;
+      animation: error-fade-in .3s ease-out both;
+    }
+    .login-error__icon {
+      flex: none;
+      font-size: .85rem;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .login-error { animation: none; }
+    }
+
+    .login-field-icon {
+      left: .875rem;
+      height: 1rem;
+      width: 1rem;
+      color: rgba(103,232,249,.6);
+    }
+    .login-field input.form-control {
+      background: rgba(255,255,255,.03);
+      border: 1px solid rgba(255,255,255,.1);
+      padding-left: 2.5rem;
+      padding-right: .875rem;
+      padding-top: .625rem;
+      padding-bottom: .625rem;
+      font-size: .875rem;
+      line-height: 1;
+      color: #fff;
+      transition: background .2s ease, border-color .2s ease, box-shadow .2s ease;
+    }
+    .login-field input.form-control::placeholder {
+      color: rgba(255,255,255,.55);
+      letter-spacing: .05em;
+    }
+    .login-field input.form-control:focus {
+      background: rgba(53,231,255,.05);
+      border-color: rgba(255,255,255,.1);
+      box-shadow: 0 0 0 3px rgba(53,231,255,.15), 0 0 20px -4px rgba(53,231,255,.4);
+      color: #fff;
+    }
+    .login-field input.form-control:-webkit-autofill {
+      -webkit-text-fill-color: #e6fbff;
+      -webkit-box-shadow: 0 0 0 1000px rgba(8,16,24,.9) inset;
+      transition: background-color 9999s ease-in-out 0s;
+    }
+
+    .login-select.form-select {
+      background-color: rgba(255,255,255,.03);
+      border: 1px solid rgba(255,255,255,.1);
+      padding: .625rem 2.25rem .625rem .875rem;
+      font-size: .875rem;
+      line-height: 1;
+      color: #fff;
+      transition: background .2s ease, border-color .2s ease, box-shadow .2s ease, opacity .2s ease;
+    }
+    .login-select.form-select:focus {
+      background-color: rgba(53,231,255,.05);
+      border-color: rgba(255,255,255,.1);
+      box-shadow: 0 0 0 3px rgba(53,231,255,.15), 0 0 20px -4px rgba(53,231,255,.4);
+      color: #fff;
+    }
+    .login-select.form-select:disabled {
+      opacity: .4;
+    }
+    .login-select.form-select option {
+      color: #111;
+    }
+
+    .login-btn {
+      background: linear-gradient(135deg, #35e7ff, #7bf3ff);
+      box-shadow: 0 0 24px -6px rgba(53,231,255,.7), 0 8px 20px -8px rgba(0,0,0,.6);
+      transition: box-shadow .25s ease, transform .15s ease, filter .2s ease;
+      color: #04070d;
+      line-height: 1.2;
+      border: none;
+    }
+    .login-btn:hover { box-shadow: 0 0 36px -4px rgba(53,231,255,.9), 0 10px 24px -8px rgba(0,0,0,.65); filter: brightness(1.05); color: #04070d; }
+    .login-btn:active { transform: translateY(1px) scale(.99); }
+    .login-btn-sub {
+      font-size: .625rem;
+      letter-spacing: .2em;
+      color: rgba(4,7,13,.7);
+    }
+
+    .card-topbar {
+      top: 1rem;
+      left: 1rem;
+      right: 1rem;
+      z-index: 3;
+    }
+    .card-icon-btn {
+      background: transparent;
+      border: none;
+      color: rgba(103,232,249,.6);
+      font-size: 1.3rem;
+      line-height: 1;
+      padding: .25rem;
+      transition: color .2s ease, filter .2s ease;
+    }
+    .card-icon-btn:hover {
+      color: var(--cyan);
+      filter: drop-shadow(0 0 6px rgba(53,231,255,.6));
+    }
+    .back-icon-btn {
+      font-size: 1.75rem;
+    }
+    .topbar-username {
+      font-size: .75rem;
+      letter-spacing: .12em;
+      color: rgba(103,232,249,.6);
+    }
+  </style>
+</head>
+<body>
+  <main class="hero" id="hero">
+    <div class="hero__stage" id="stage">
+
+      <div class="layer-parallax layer-parallax--bg" id="bgParallax">
+        <div class="layer-idle layer-idle--bg" id="bgIdle">
+          <img class="layer__img" id="bgImg"
+               src="{{ url_for('static', filename='bg.jpeg') }}"
+               alt="" fetchpriority="high">
+        </div>
+      </div>
+
+      <div class="layer-parallax layer-parallax--ship" id="shipParallax">
+        <div class="layer-idle layer-idle--ship" id="shipIdle">
+          <img class="layer__img" id="shipImg"
+               src="{{ url_for('static', filename='ship.png') }}"
+               alt="" fetchpriority="high">
+        </div>
+      </div>
+
+      <div class="wire-glow" id="wireGlow" aria-hidden="true"></div>
+      <div class="particles" id="particles" aria-hidden="true"></div>
+
+      <div class="scanline" id="scanline" aria-hidden="true">
+        <div class="scanline__bar" id="scanBar"></div>
+      </div>
+
+    </div>
+
+    {% macro card(id, title, subtitle, tag='div', hidden=False, attrs='', show_logout=False, show_back=False, icon=None) %}
+    <{{ tag }} id="{{ id }}" class="login-card{% if hidden %} d-none{% endif %} pe-auto position-relative w-100 rounded-4 px-3 px-sm-4 pb-4 pb-sm-5"{% if attrs %} {{ attrs|safe }}{% endif %}>
+      <div class="login-card__blur" aria-hidden="true">
+        <img class="login-card__blur-img" src="{{ url_for('static', filename='bg.jpeg') }}" alt="">
+        <img class="login-card__blur-img" src="{{ url_for('static', filename='ship.png') }}" alt="">
+      </div>
+      <div class="login-card__tint" aria-hidden="true"></div>
+
+      {% if show_logout or show_back %}
+      <div class="card-topbar position-absolute d-flex align-items-center justify-content-between">
+        <div>
+          {% if show_back %}
+          <button type="button" id="{{ id }}-back" class="card-icon-btn back-icon-btn" aria-label="Back" title="Back">
+            <i class="bi bi-arrow-left"></i>
+          </button>
+          {% endif %}
+        </div>
+        {% if show_logout %}
+        <div class="d-flex align-items-center gap-1">
+          <span class="topbar-username text-uppercase"></span>
+          <button type="button" class="card-icon-btn logout-corner-btn" aria-label="Logout" title="Logout">
+            <i class="bi bi-box-arrow-right"></i>
+          </button>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      <div class="login-card__content position-relative">
+        <div class="d-flex flex-column align-items-center text-center mb-4">
+          {% if icon %}
+          <i class="bi bi-{{ icon }} login-icon login-icon--bi mb-3" aria-hidden="true"></i>
+          {% else %}
+          <img src="{{ url_for('static', filename='app-icon.png') }}" alt="VAE"
+               class="login-icon object-fit-contain mb-3">
+          {% endif %}
+          <p class="login-title text-white fw-bold text-uppercase mt-1 mb-2">{{ title }}</p>
+          {% if subtitle %}<p class="login-subtitle text-uppercase mb-0">{{ subtitle }}</p>{% endif %}
+        </div>
+
+        {{ caller() }}
+      </div>
+    </{{ tag }}>
+    {% endmacro %}
+
+    <div class="position-absolute top-0 start-0 w-100 h-100 z-3 d-flex align-items-center justify-content-center px-3 px-sm-5 pe-none">
+
+      {% call card('loginCard', 'Digital System Model', 'Secure Access', tag='form', attrs='autocomplete="off" style="opacity:0"') %}
+        <div class="login-field position-relative mb-3">
+          <i class="bi bi-person login-field-icon pe-none position-absolute top-50 translate-middle-y d-flex align-items-center justify-content-center"></i>
+          <input type="text" name="username" required aria-label="Username" placeholder="USERNAME"
+                 class="form-control w-100 rounded-3 outline-none">
+        </div>
+
+        <div class="login-field position-relative mb-4">
+          <i class="bi bi-lock login-field-icon pe-none position-absolute top-50 translate-middle-y d-flex align-items-center justify-content-center"></i>
+          <input type="password" name="password" required aria-label="Password" placeholder="PASSWORD"
+                 class="form-control w-100 rounded-3 outline-none">
+        </div>
+
+        <div id="loginError" class="login-error mb-3 d-none" role="alert">
+          <i class="bi bi-exclamation-triangle-fill login-error__icon" aria-hidden="true"></i>
+          <span class="login-error__text"></span>
+        </div>
+
+        <button type="submit" id="loginSubmitBtn" class="login-btn btn w-100 rounded-3 py-2 fw-semibold">
+          <span class="d-block text-uppercase fs-6 mb-1">Login</span>
+          <span class="login-btn-sub d-block text-uppercase fw-medium">Access Digital Twin</span>
+        </button>
+      {% endcall %}
+
+      {% call card('configDbCard', 'Config Management DB', 'Enter Your Credentials', tag='form', hidden=True, attrs='autocomplete="off"', show_logout=True, icon='database') %}
+        <div class="login-field position-relative mb-2">
+          <i class="bi bi-hdd-network login-field-icon pe-none position-absolute top-50 translate-middle-y d-flex align-items-center justify-content-center"></i>
+          <input type="text" name="configMgmtAddress" required aria-label="Config management DB address" placeholder="ADDRESS"
+                 class="form-control w-100 rounded-3 outline-none">
+        </div>
+        <div class="login-field position-relative mb-2">
+          <i class="bi bi-person login-field-icon pe-none position-absolute top-50 translate-middle-y d-flex align-items-center justify-content-center"></i>
+          <input type="text" name="configMgmtUsername" required aria-label="Config management DB username" placeholder="USERNAME"
+                 class="form-control w-100 rounded-3 outline-none">
+        </div>
+        <div class="login-field position-relative mb-4">
+          <i class="bi bi-lock login-field-icon pe-none position-absolute top-50 translate-middle-y d-flex align-items-center justify-content-center"></i>
+          <input type="password" name="configMgmtPassword" required aria-label="Config management DB password" placeholder="PASSWORD"
+                 class="form-control w-100 rounded-3 outline-none">
+        </div>
+
+        <div id="configDbError" class="login-error mb-3 d-none" role="alert">
+          <i class="bi bi-exclamation-triangle-fill login-error__icon" aria-hidden="true"></i>
+          <span class="login-error__text"></span>
+        </div>
+
+        <button type="submit" id="configDbSubmitBtn" class="login-btn btn w-100 rounded-3 py-2 fw-semibold">
+          <span class="d-block text-uppercase fs-6 mb-1">Next</span>
+        </button>
+      {% endcall %}
+
+      {% call card('selectionCard', 'Select Project', 'Choose Platform & Version', tag='form', hidden=True, show_logout=True, show_back=True, icon='diagram-3') %}
+        <div class="mb-2">
+          <select name="projectId" required aria-label="Project" class="login-select form-select w-100 rounded-3"></select>
+        </div>
+        <div class="mb-2">
+          <select name="platformId" required aria-label="Platform" class="login-select form-select w-100 rounded-3" disabled></select>
+        </div>
+        <div class="mb-4">
+          <select name="versionId" required aria-label="Version" class="login-select form-select w-100 rounded-3" disabled></select>
+        </div>
+
+        <div id="selectionError" class="login-error mb-3 d-none" role="alert">
+          <i class="bi bi-exclamation-triangle-fill login-error__icon" aria-hidden="true"></i>
+          <span class="login-error__text"></span>
+        </div>
+
+        <button type="submit" id="selectionSubmitBtn" class="login-btn btn w-100 rounded-3 py-2 fw-semibold">
+          <span class="d-block text-uppercase fs-6 mb-1">Next</span>
+        </button>
+      {% endcall %}
+
+      {% call card('sourceRepoCard', 'Source Code Repo', 'Enter Your Credentials', tag='form', hidden=True, attrs='autocomplete="off"', show_logout=True, show_back=True, icon='git') %}
+        <div class="login-field position-relative mb-2">
+          <i class="bi bi-hdd-network login-field-icon pe-none position-absolute top-50 translate-middle-y d-flex align-items-center justify-content-center"></i>
+          <input type="text" name="sourceRepoAddress" required aria-label="Source code repo address" placeholder="ADDRESS"
+                 class="form-control w-100 rounded-3 outline-none">
+        </div>
+        <div class="login-field position-relative mb-2">
+          <i class="bi bi-person login-field-icon pe-none position-absolute top-50 translate-middle-y d-flex align-items-center justify-content-center"></i>
+          <input type="text" name="sourceRepoUsername" required aria-label="Source code repo username" placeholder="USERNAME"
+                 class="form-control w-100 rounded-3 outline-none">
+        </div>
+        <div class="login-field position-relative mb-4">
+          <i class="bi bi-lock login-field-icon pe-none position-absolute top-50 translate-middle-y d-flex align-items-center justify-content-center"></i>
+          <input type="password" name="sourceRepoPassword" required aria-label="Source code repo password" placeholder="PASSWORD"
+                 class="form-control w-100 rounded-3 outline-none">
+        </div>
+
+        <div id="sourceRepoError" class="login-error mb-3 d-none" role="alert">
+          <i class="bi bi-exclamation-triangle-fill login-error__icon" aria-hidden="true"></i>
+          <span class="login-error__text"></span>
+        </div>
+
+        <button type="submit" id="sourceRepoSubmitBtn" class="login-btn btn w-100 rounded-3 py-2 fw-semibold">
+          <span class="d-block text-uppercase fs-6 mb-1">Connect</span>
+        </button>
+      {% endcall %}
+
+      {% call card('runCard', 'Run Production', 'Generate Model Setup Data', hidden=True, show_logout=True, show_back=True, icon='rocket-takeoff') %}
+        <div class="text-center">
+          <p class="text-white small mb-3"><span id="runSelectionSummary" class="fw-bold"></span></p>
+
+          <p id="runStatus" class="login-subtitle text-uppercase mb-3"></p>
+
+          <div id="runResult" class="text-start small text-white mb-3 d-none"></div>
+
+          <button type="button" id="runSubmitBtn" class="login-btn btn w-100 rounded-3 py-2 fw-semibold">
+            <span class="d-block text-uppercase fs-6 mb-1">Run</span>
+          </button>
+        </div>
+      {% endcall %}
+
+    </div>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.15.0/gsap.min.js"
+          integrity="sha512-oJ8QbaQThQoJZ7oEv+29jfPM6CcP+zUxh3PKJs1vyOhx0UraUrE7PQgeItu3dOuCJyrzWpoYMsVjkkPEBzbUqw=="
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const hero = document.getElementById('hero');
+
+      if (!window.gsap) {
+        hero.style.opacity = '1';
+        window.__vaeHeroReveal = (card) => { card.style.opacity = '1'; };
+        return;
+      }
+
+      const stage = document.getElementById('stage');
+      const bgParallax = document.getElementById('bgParallax');
+      const bgIdle = document.getElementById('bgIdle');
+      const shipParallax = document.getElementById('shipParallax');
+      const shipIdle = document.getElementById('shipIdle');
+      const scanBar = document.getElementById('scanBar');
+      const wireGlow = document.getElementById('wireGlow');
+      const particlesEl = document.getElementById('particles');
+
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      const BG_SCALE = 1.1;
+      const BG_DRIFT_PX = 14, BG_DRIFT_DUR = 20;
+      const SHIP_BOB_PX = 6, SHIP_ROT_DEG = 0.5, SHIP_LOOP_DUR = 4;
+      const BG_PARALLAX_PX = 10, SHIP_PARALLAX_PX = 26, MAX_TILT_DEG = 6;
+      const SCAN_BAR_WIDTH_PCT = 2, SCAN_BOUNCE_DUR = 5.5, SCAN_OPACITY = 0.9;
+
+      gsap.set(bgIdle, { scale: BG_SCALE, transformOrigin: '50% 50%' });
+      gsap.set(shipIdle, { transformOrigin: '50% 50%' });
+
+      function cardRevealTargets(card) {
+        const content = card.querySelector('.login-card__content');
+        return content ? content.children : [];
+      }
+
+      function buildEntrance(card) {
+        if (reduceMotion) {
+          gsap.set(hero, { autoAlpha: 1 });
+          gsap.set(card, { autoAlpha: 1 });
+          return gsap.timeline();
+        }
+
+        gsap.set(hero, { autoAlpha: 0 });
+        gsap.set(bgIdle, { scale: BG_SCALE * 1.22 });
+        gsap.set(shipParallax, { autoAlpha: 0, y: 14, scale: 1.06 });
+        gsap.set(scanBar, { left: '0%', autoAlpha: 0 });
+        gsap.set(card, { autoAlpha: 0, y: -18, scale: .98 });
+        gsap.set(cardRevealTargets(card), { autoAlpha: 0, y: 10 });
+
+        const tl = gsap.timeline({ defaults: { ease: 'power3.out' } });
+        tl.to(hero, { autoAlpha: 1, duration: 1.1 }, 0)
+          .to(bgIdle, { scale: BG_SCALE, duration: 1.8, ease: 'power2.out' }, 0)
+          .to(shipParallax, { autoAlpha: 1, y: 0, scale: 1, duration: 1.4, ease: 'power2.out' }, 0.25)
+          .to(card, { autoAlpha: 1, y: 0, scale: 1, duration: 0.9, ease: 'power2.out' }, 0.5)
+          .to(cardRevealTargets(card), {
+            autoAlpha: 1, y: 0, duration: .4, ease: 'power2.out', stagger: .08,
+          }, 0.75);
+        return tl;
+      }
+
+      function animateParticle(p, delay) {
+        gsap.set(p, {
+          left: gsap.utils.random(5, 95) + '%',
+          top: gsap.utils.random(30, 95) + '%',
+          y: 0, opacity: 0,
+        });
+        gsap.to(p, {
+          y: '-=140', opacity: gsap.utils.random(0.3, 0.8),
+          duration: gsap.utils.random(5, 9), ease: 'sine.inOut', delay,
+          onComplete: () => animateParticle(p, 0),
+        });
+      }
+
+      function spawnParticles() {
+        const N = 24;
+        for (let i = 0; i < N; i++) {
+          const p = document.createElement('div');
+          p.className = 'particle';
+          particlesEl.appendChild(p);
+          animateParticle(p, i * 0.4);
+        }
+      }
+
+      function startIdleLoop() {
+        gsap.to(shipIdle, {
+          y: `+=${SHIP_BOB_PX}`, rotation: SHIP_ROT_DEG,
+          duration: SHIP_LOOP_DUR, ease: 'sine.inOut', repeat: -1, yoyo: true,
+        });
+
+        gsap.to(bgIdle, {
+          x: `+=${BG_DRIFT_PX}`,
+          duration: BG_DRIFT_DUR, ease: 'sine.inOut', repeat: -1, yoyo: true,
+        });
+
+        gsap.to(wireGlow, {
+          opacity: 0.5, scale: 1.18, transformOrigin: '50% 50%',
+          duration: 3.5, ease: 'sine.inOut', repeat: -1, yoyo: true,
+        });
+
+        gsap.to(scanBar, { autoAlpha: SCAN_OPACITY, duration: 1.2 });
+        gsap.to(scanBar, {
+          left: `${100 - SCAN_BAR_WIDTH_PCT}%`,
+          duration: SCAN_BOUNCE_DUR, ease: 'sine.inOut', repeat: -1, yoyo: true,
+        });
+
+        spawnParticles();
+      }
+
+      function setupParallax() {
+        const qBgX = gsap.quickTo(bgParallax, 'x', { duration: .6, ease: 'power3' });
+        const qBgY = gsap.quickTo(bgParallax, 'y', { duration: .6, ease: 'power3' });
+        const qShipX = gsap.quickTo(shipParallax, 'x', { duration: .5, ease: 'power3' });
+        const qShipY = gsap.quickTo(shipParallax, 'y', { duration: .5, ease: 'power3' });
+        const qRotX = gsap.quickTo(stage, 'rotationX', { duration: .6, ease: 'power3' });
+        const qRotY = gsap.quickTo(stage, 'rotationY', { duration: .6, ease: 'power3' });
+
+        hero.addEventListener('pointermove', (e) => {
+          const rect = hero.getBoundingClientRect();
+          const px = (e.clientX - rect.left) / rect.width;
+          const py = (e.clientY - rect.top) / rect.height;
+          const nx = px * 2 - 1, ny = py * 2 - 1;
+
+          qBgX(nx * BG_PARALLAX_PX);   qBgY(ny * BG_PARALLAX_PX * 0.6);
+          qShipX(nx * SHIP_PARALLAX_PX); qShipY(ny * SHIP_PARALLAX_PX * 0.6);
+          qRotY(nx * MAX_TILT_DEG);    qRotX(-ny * MAX_TILT_DEG);
+        });
+
+        hero.addEventListener('pointerleave', () => {
+          qBgX(0); qBgY(0); qShipX(0); qShipY(0); qRotX(0); qRotY(0);
+        });
+      }
+
+      window.__vaeHeroReveal = function (card) {
+        const entrance = buildEntrance(card);
+        entrance.eventCallback('onComplete', () => {
+          if (!reduceMotion) {
+            startIdleLoop();
+            setupParallax();
+          }
+        });
+      };
+    });
+  </script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const loginCard = document.getElementById('loginCard');
+      const loginError = document.getElementById('loginError');
+      const loginSubmitBtn = document.getElementById('loginSubmitBtn');
+      const configDbCard = document.getElementById('configDbCard');
+      const configDbError = document.getElementById('configDbError');
+      const configDbSubmitBtn = document.getElementById('configDbSubmitBtn');
+      const selectionCard = document.getElementById('selectionCard');
+      const selectionError = document.getElementById('selectionError');
+      const projectSelect = selectionCard.elements['projectId'];
+      const platformSelect = selectionCard.elements['platformId'];
+      const versionSelect = selectionCard.elements['versionId'];
+      const sourceRepoCard = document.getElementById('sourceRepoCard');
+      const sourceRepoError = document.getElementById('sourceRepoError');
+      const sourceRepoSubmitBtn = document.getElementById('sourceRepoSubmitBtn');
+      const runCard = document.getElementById('runCard');
+      const runSelectionSummary = document.getElementById('runSelectionSummary');
+      const runStatus = document.getElementById('runStatus');
+      const runResult = document.getElementById('runResult');
+      const runSubmitBtn = document.getElementById('runSubmitBtn');
+      const passwordInput = loginCard.elements['password'];
+
+      let sourceRepoDefaultAddress = ''; // carried from login through the config-db step
+      let pollTimer = null;
+
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      function cardRevealTargets(card) {
+        const content = card.querySelector('.login-card__content');
+        return content ? content.children : [];
+      }
+
+      function crossfade(hideEl, showEl) {
+        if (!window.gsap || reduceMotion) {
+          hideEl.classList.add('d-none');
+          showEl.classList.remove('d-none');
+          return;
+        }
+        gsap.to(hideEl, {
+          autoAlpha: 0, y: -8, duration: .25, ease: 'power2.in',
+          onComplete: () => {
+            hideEl.classList.add('d-none');
+            gsap.fromTo(
+              showEl,
+              { autoAlpha: 0, y: 8 },
+              { autoAlpha: 1, y: 0, duration: .35, ease: 'power2.out', clearProps: 'transform' }
+            );
+            gsap.fromTo(
+              cardRevealTargets(showEl),
+              { autoAlpha: 0, y: 10 },
+              { autoAlpha: 1, y: 0, duration: .35, ease: 'power2.out', stagger: .06, delay: .1 }
+            );
+            showEl.classList.remove('d-none');
+          },
+        });
+      }
+
+      function shake(card) {
+        card.classList.remove('shake');
+        void card.offsetWidth; // restart the animation on repeated failures
+        card.classList.add('shake');
+      }
+
+      function showError(message) {
+        loginError.querySelector('.login-error__text').textContent = message;
+        loginError.classList.remove('d-none');
+        shake(loginCard);
+      }
+
+      function showConfigDbError(message) {
+        configDbError.querySelector('.login-error__text').textContent = message;
+        configDbError.classList.remove('d-none');
+        shake(configDbCard);
+      }
+
+      function showSourceRepoError(message) {
+        sourceRepoError.querySelector('.login-error__text').textContent = message;
+        sourceRepoError.classList.remove('d-none');
+        shake(sourceRepoCard);
+      }
+
+      function showSelectionError(message) {
+        selectionError.querySelector('.login-error__text').textContent = message;
+        selectionError.classList.remove('d-none');
+        shake(selectionCard);
+      }
+
+      function resetSelect(select, placeholder, disabled) {
+        select.innerHTML = '';
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = placeholder;
+        opt.disabled = true;
+        opt.selected = true;
+        select.appendChild(opt);
+        select.disabled = disabled;
+      }
+
+      function populateSelect(select, items, valueKey, labelKey, effectiveKey) {
+        for (const item of items) {
+          const opt = document.createElement('option');
+          opt.value = item[valueKey];
+          opt.textContent = effectiveKey && item[effectiveKey] ? `${item[labelKey]} (current)` : item[labelKey];
+          select.appendChild(opt);
+        }
+        select.disabled = false;
+      }
+
+      const loadTokens = new WeakMap();
+
+      async function loadOptions(select, url, valueKey, labelKey, effectiveKey) {
+        const token = (loadTokens.get(select) || 0) + 1;
+        loadTokens.set(select, token);
+        try {
+          const res = await fetch(url, { credentials: 'same-origin' });
+          const body = await res.json().catch(() => ({}));
+          if (loadTokens.get(select) !== token) return; // superseded by a newer request
+          if (res.ok) {
+            const items = body.projects || body.platforms || body.versions || [];
+            populateSelect(select, items, valueKey, labelKey, effectiveKey);
+          } else {
+            showSelectionError(body.error || 'Failed to load options');
+          }
+        } catch (err) {
+          if (loadTokens.get(select) !== token) return; // superseded by a newer request
+          showSelectionError('Unable to reach the server');
+        }
+      }
+
+      function loadProjects() {
+        resetSelect(projectSelect, 'PROJECT', false);
+        resetSelect(platformSelect, 'PLATFORM', true);
+        resetSelect(versionSelect, 'VERSION', true);
+        loadOptions(projectSelect, '/api/projects', 'project_id', 'name');
+      }
+
+      function loadPlatforms(projectId) {
+        resetSelect(platformSelect, 'PLATFORM', true);
+        resetSelect(versionSelect, 'VERSION', true);
+        if (!projectId) return;
+        loadOptions(platformSelect, `/api/projects/${encodeURIComponent(projectId)}/platforms`, 'platform_id', 'name');
+      }
+
+      function loadVersions(projectId, platformId) {
+        resetSelect(versionSelect, 'VERSION', true);
+        if (!platformId) return;
+        loadOptions(
+          versionSelect,
+          `/api/projects/${encodeURIComponent(projectId)}/platforms/${encodeURIComponent(platformId)}/versions`,
+          'version_id', 'label', 'is_effective'
+        );
+      }
+
+      projectSelect.addEventListener('change', () => loadPlatforms(projectSelect.value));
+      platformSelect.addEventListener('change', () => loadVersions(projectSelect.value, platformSelect.value));
+
+      function setTopbarUsername(username) {
+        document.querySelectorAll('.topbar-username').forEach((el) => {
+          el.textContent = username;
+        });
+      }
+
+      function showConfigDbCard(defaults) {
+        configDbCard.elements['configMgmtAddress'].value = defaults.config_mgmt_db || '';
+        sourceRepoDefaultAddress = defaults.source_code_repo || '';
+        crossfade(loginCard, configDbCard);
+      }
+
+      function showSelectionCard() {
+        selectionError.classList.add('d-none');
+        loadProjects();
+        crossfade(configDbCard, selectionCard);
+      }
+
+      function showSourceRepoCard() {
+        sourceRepoCard.elements['sourceRepoAddress'].value = sourceRepoDefaultAddress;
+        crossfade(selectionCard, sourceRepoCard);
+      }
+
+      function selectedLabel(select) {
+        const opt = select.options[select.selectedIndex];
+        return opt ? opt.textContent : '';
+      }
+
+      function resetRunCard() {
+        clearInterval(pollTimer);
+        runStatus.textContent = '';
+        runResult.classList.add('d-none');
+        runResult.innerHTML = '';
+        runSubmitBtn.disabled = false;
+      }
+
+      function showRunCard() {
+        runSelectionSummary.textContent =
+          `${selectedLabel(projectSelect)} / ${selectedLabel(platformSelect)} / ${selectedLabel(versionSelect)}`;
+        resetRunCard();
+        crossfade(sourceRepoCard, runCard);
+      }
+
+      function renderRunResult(result) {
+        const units = (result.units || [])
+          .map((u) => `${u.unit_name} (${u.version}): ${u.status}`)
+          .join('<br>');
+        runResult.innerHTML = `
+          <p class="mb-1">Output: ${result.output_path || ''}</p>
+          <p class="mb-0">${units}</p>
+        `;
+        runResult.classList.remove('d-none');
+      }
+
+      async function pollTask(taskId) {
+        try {
+          const res = await fetch(`/api/msd/tasks/${encodeURIComponent(taskId)}`, { credentials: 'same-origin' });
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            clearInterval(pollTimer);
+            runStatus.textContent = body.error || 'Failed to check run status';
+            runSubmitBtn.disabled = false;
+            return;
+          }
+          if (body.state === 'SUCCESS') {
+            clearInterval(pollTimer);
+            runStatus.textContent = 'Completed';
+            renderRunResult(body.result || {});
+            runSubmitBtn.disabled = false;
+          } else if (body.state === 'FAILURE') {
+            clearInterval(pollTimer);
+            runStatus.textContent = body.error || 'Run failed';
+            runSubmitBtn.disabled = false;
+          } else {
+            runStatus.textContent = body.state === 'STARTED' ? 'Running…' : 'Queued…';
+          }
+        } catch (err) {
+          clearInterval(pollTimer);
+          runStatus.textContent = 'Unable to reach the server';
+          runSubmitBtn.disabled = false;
+        }
+      }
+
+      runSubmitBtn.addEventListener('click', async () => {
+        runSubmitBtn.disabled = true;
+        runResult.classList.add('d-none');
+        runStatus.textContent = 'Submitting…';
+        try {
+          const res = await fetch('/api/msd/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({
+              project_id: projectSelect.value,
+              platform_id: platformSelect.value,
+              version_id: versionSelect.value,
+            }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (res.ok) {
+            runStatus.textContent = 'Queued…';
+            pollTimer = setInterval(() => pollTask(body.task_id), 1500);
+          } else {
+            runStatus.textContent = body.error || 'Run failed to start';
+            runSubmitBtn.disabled = false;
+          }
+        } catch (err) {
+          runStatus.textContent = 'Unable to reach the server';
+          runSubmitBtn.disabled = false;
+        }
+      });
+
+      function showLoginCard() {
+        const postLoginCards = [configDbCard, selectionCard, sourceRepoCard, runCard];
+        const currentCard = postLoginCards.find((card) => !card.classList.contains('d-none')) || sourceRepoCard;
+
+        passwordInput.value = '';
+        configDbCard.reset();
+        resetSelect(projectSelect, 'PROJECT', false);
+        resetSelect(platformSelect, 'PLATFORM', true);
+        resetSelect(versionSelect, 'VERSION', true);
+        sourceRepoCard.reset();
+        resetRunCard();
+        setTopbarUsername('');
+        postLoginCards.forEach((card) => {
+          if (card !== currentCard) card.classList.add('d-none');
+        });
+
+        crossfade(currentCard, loginCard);
+      }
+
+      loginCard.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        loginError.classList.add('d-none');
+        loginSubmitBtn.disabled = true;
+        try {
+          const res = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({
+              username: loginCard.elements['username'].value,
+              password: passwordInput.value,
+            }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (res.ok) {
+            setTopbarUsername(body.username || '');
+            showConfigDbCard(body.defaults || {});
+          } else {
+            showError(body.error || 'Login failed');
+          }
+        } catch (err) {
+          showError('Unable to reach the server');
+        } finally {
+          loginSubmitBtn.disabled = false;
+        }
+      });
+
+      configDbCard.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        configDbError.classList.add('d-none');
+        configDbSubmitBtn.disabled = true;
+        try {
+          const res = await fetch('/api/data-sources/connect/config-mgmt-db', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({
+              connection_address: configDbCard.elements['configMgmtAddress'].value,
+              username: configDbCard.elements['configMgmtUsername'].value,
+              password: configDbCard.elements['configMgmtPassword'].value,
+            }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (res.ok) {
+            showSelectionCard();
+          } else {
+            showConfigDbError(body.error || 'Connection failed');
+          }
+        } catch (err) {
+          showConfigDbError('Unable to reach the server');
+        } finally {
+          configDbSubmitBtn.disabled = false;
+        }
+      });
+
+      selectionCard.addEventListener('submit', (e) => {
+        e.preventDefault();
+        showSourceRepoCard();
+      });
+
+      sourceRepoCard.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        sourceRepoError.classList.add('d-none');
+        sourceRepoSubmitBtn.disabled = true;
+        try {
+          const res = await fetch('/api/data-sources/connect/source-code-repo', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({
+              connection_address: sourceRepoCard.elements['sourceRepoAddress'].value,
+              username: sourceRepoCard.elements['sourceRepoUsername'].value,
+              password: sourceRepoCard.elements['sourceRepoPassword'].value,
+            }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (res.ok) {
+            showRunCard();
+          } else {
+            showSourceRepoError(body.error || 'Connection failed');
+          }
+        } catch (err) {
+          showSourceRepoError('Unable to reach the server');
+        } finally {
+          sourceRepoSubmitBtn.disabled = false;
+        }
+      });
+
+      document.querySelectorAll('.logout-corner-btn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          try {
+            await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
+          } finally {
+            showLoginCard();
+          }
+        });
+      });
+
+      document.getElementById('selectionCard-back').addEventListener('click', () => {
+        crossfade(selectionCard, configDbCard);
+      });
+      document.getElementById('sourceRepoCard-back').addEventListener('click', () => {
+        crossfade(sourceRepoCard, selectionCard);
+      });
+      document.getElementById('runCard-back').addEventListener('click', () => {
+        crossfade(runCard, sourceRepoCard);
+      });
+
+      (async function resumeSession() {
+        let sessionState = null;
+        try {
+          const res = await fetch('/api/session', { credentials: 'same-origin' });
+          sessionState = await res.json().catch(() => null);
+        } catch (err) {
+          sessionState = null;
+        }
+
+        if (!sessionState || !sessionState.authenticated) {
+          window.__vaeHeroReveal(loginCard);
+          return;
+        }
+
+        const defaults = sessionState.defaults || {};
+        setTopbarUsername(sessionState.username || '');
+        configDbCard.elements['configMgmtAddress'].value = defaults.config_mgmt_db || '';
+        sourceRepoDefaultAddress = defaults.source_code_repo || '';
+        loginCard.classList.add('d-none');
+
+        if (sessionState.config_mgmt_db_connected) {
+          // Project/platform/version selection isn't persisted server-side,
+          // so a resumed session always re-enters at selection, even if the
+          // source-code-repo connection also survived the reload.
+          selectionError.classList.add('d-none');
+          loadProjects();
+          selectionCard.classList.remove('d-none');
+          window.__vaeHeroReveal(selectionCard);
+        } else {
+          configDbCard.classList.remove('d-none');
+          window.__vaeHeroReveal(configDbCard);
+        }
+      })();
+    });
+  </script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 from fakes.fake_config_management_repository import FakeConfigManagementRepository
-from domain.inventory import SoftwareUnitVersion
-from domain.project_context import ProjectContext, PlatformRecord, ProjectRecord, VersionRecord
-from services.build_software_unit_inventory import BuildSoftwareUnitInventory
+from msd.domain.inventory import SoftwareUnitVersion
+from msd.domain.project_context import ProjectContext, PlatformRecord, ProjectRecord, VersionRecord
+from msd.services.build_software_unit_inventory import BuildSoftwareUnitInventory
 
 
 def _context() -> ProjectContext:

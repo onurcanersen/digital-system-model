@@ -2,7 +2,7 @@
 data that flows into the Model Setup Data graph via
 json_model_setup_data_writer.py (SRS DSM-MSD req 3, 19)."""
 
-from adapters.analysis.system_repo_parser import SystemRepoParser
+from msd.adapters.analysis.system_repo_parser import SystemRepoParser
 
 
 def test_get_app_role_relation_returns_non_empty_role_lists(tmp_path):

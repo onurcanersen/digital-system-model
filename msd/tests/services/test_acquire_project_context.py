@@ -1,7 +1,7 @@
 from fakes.fake_config_management_repository import FakeConfigManagementRepository
-from domain.status import AcquisitionStatus
-from ports.config_management_repository import ConfigManagementAccessError
-from services.acquire_project_context import AcquireProjectContext
+from msd.domain.status import AcquisitionStatus
+from msd.ports.config_management_repository import ConfigManagementAccessError
+from msd.services.acquire_project_context import AcquireProjectContext
 
 
 def test_execute_returns_context_when_explicit_ids_match():

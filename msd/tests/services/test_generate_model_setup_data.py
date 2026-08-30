@@ -6,19 +6,19 @@ import json
 from pathlib import Path
 from typing import List
 
-from adapters.json_model_setup_data_writer import JsonModelSetupDataWriter
+from msd.adapters.json_model_setup_data_writer import JsonModelSetupDataWriter
 from fakes.fake_config_management_repository import FakeConfigManagementRepository
 from fakes.fake_source_code_repository import FakeSourceCodeRepository
-from domain.inventory import SoftwareUnitVersion
-from domain.status import AcquisitionStatus
-from domain.extracted_topic import ExtractedTopic, TopicRole
-from domain.validation import MandatoryFieldRule
-from ports.source_analyzer import ISourceAnalyzer
-from services.acquire_project_context import AcquireProjectContext
-from services.analyze_software_units import AnalyzeSoftwareUnits
-from services.build_software_unit_inventory import BuildSoftwareUnitInventory
-from services.generate_model_setup_data import GenerateModelSetupData
-from services.validate_mandatory_fields import ValidateMandatoryFields
+from msd.domain.inventory import SoftwareUnitVersion
+from msd.domain.status import AcquisitionStatus
+from msd.domain.extracted_topic import ExtractedTopic, TopicRole
+from msd.domain.validation import MandatoryFieldRule
+from msd.ports.source_analyzer import ISourceAnalyzer
+from msd.services.acquire_project_context import AcquireProjectContext
+from msd.services.analyze_software_units import AnalyzeSoftwareUnits
+from msd.services.build_software_unit_inventory import BuildSoftwareUnitInventory
+from msd.services.generate_model_setup_data import GenerateModelSetupData
+from msd.services.validate_mandatory_fields import ValidateMandatoryFields
 
 
 class _FakeAnalyzer(ISourceAnalyzer):

@@ -9,51 +9,54 @@ docker compose up
 
 ## Set up the venv
 
+`msd` (DSM-MSD) is a library — clone/generate business logic, no API or
+worker of its own. `vae` (DSM-VAE) is the serving layer: it imports msd and
+exposes it via a Flask API, a Celery worker, and a UI. Install msd first,
+since vae depends on it:
+
 ```bash
-python3.9 -m venv venv
+python3 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -e ./msd -e ./vae
 ```
 
-## Start MSD
+## Start VAE
 
 In one terminal, start the worker:
 
 ```bash
-cd msd
-python worker.py
+vae-worker
 ```
 
 Optional: set the worker process count with `-c`/`--concurrency`
 (default is the CPU count, as per Celery):
 
 ```bash
-cd msd
-python worker.py -c 4
+vae-worker -c 4
 ```
 
 In a second terminal, start the API:
 
 ```bash
-cd msd
-python api.py
+vae-api
 ```
 
-Both read the same `config.ini` (worker: `[worker]`, API: `[api]`).
+Both read the same `vae/src/vae/config.ini` (worker: `[worker]`, API: `[api]`,
+plus `[config_mgmt_db]` for project/platform/version selection).
+(Equivalent to `python -m vae.worker` / `python -m vae.api`.)
 
 Then open the UI at <http://127.0.0.1:8080>.
 
-### API endpoints
+### VAE API endpoints
 
 | Method | Path | Description |
 | ------ | ---- | ----------- |
 | GET | `/` | Single-page UI |
-| GET | `/api/projects` | List projects |
+| GET | `/api/projects` | List projects (via msd's config-mgmt repository) |
 | GET | `/api/projects/<project_id>/platforms` | List platforms for a project |
 | GET | `/api/projects/<project_id>/platforms/<platform_id>/versions` | List versions for a platform |
-| GET | `/api/projects/<project_id>/platforms/<platform_id>/versions/<version_id>/units` | List unit versions for a selection |
-| POST | `/api/run` | Enqueue clone + generate; body `{"project_id", "platform_id", "version_id"}`, returns `202 {"task_id", "status_url"}` |
-| GET | `/api/tasks/<task_id>` | Task state, result or error |
+| POST | `/api/msd/run` | Enqueue msd's clone + generate workflow; body `{"project_id", "platform_id", "version_id"}`, returns `202 {"task_id", "status_url"}` |
+| GET | `/api/msd/tasks/<task_id>` | Task state, result or error |
 
 ## Run the containers
 

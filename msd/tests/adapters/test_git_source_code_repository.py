@@ -3,7 +3,7 @@ check (used by both git_source_code_repository.py and make_build_runner.py) — 
 subprocess/git mocking needed (real git behavior stays manually verified,
 not automated)."""
 
-from adapters.source_code.mandatory_file_catalog import makefile_has_valid_include
+from msd.adapters.source_code.mandatory_file_catalog import makefile_has_valid_include
 
 
 def test_returns_true_when_pattern_present():

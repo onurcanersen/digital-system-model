@@ -3,12 +3,12 @@ from typing import List
 
 import pytest
 
-from domain.inventory import SoftwareUnitVersion, SoftwareUnitVersionInventory
-from domain.project_context import ProjectContext, PlatformRecord, ProjectRecord, VersionRecord
-from domain.extracted_topic import ExtractedTopic, TopicRole
-from ports.build_runner import IBuildRunner
-from ports.source_analyzer import ISourceAnalyzer
-from services.analyze_software_units import AnalyzeSoftwareUnits
+from msd.domain.inventory import SoftwareUnitVersion, SoftwareUnitVersionInventory
+from msd.domain.project_context import ProjectContext, PlatformRecord, ProjectRecord, VersionRecord
+from msd.domain.extracted_topic import ExtractedTopic, TopicRole
+from msd.ports.build_runner import IBuildRunner
+from msd.ports.source_analyzer import ISourceAnalyzer
+from msd.services.analyze_software_units import AnalyzeSoftwareUnits
 
 
 class _FakeAnalyzer(ISourceAnalyzer):
