@@ -3,12 +3,15 @@ a Celery app configured from vae's own [worker] section of config.ini, and
 the vae.run_msd_workflow task must call msd's workflow with a workspace dir
 keyed by the task's id."""
 
+import logging
+import re
 from pathlib import Path
 from unittest import mock
 
 from celery import Celery
 
 from vae import worker
+from vae.adapters.in_memory_task_output_store import InMemoryTaskOutputStore
 from vae.config import get_config
 
 
@@ -42,7 +45,8 @@ def test_run_msd_workflow_task_calls_workflow_with_workspace_keyed_by_task_id(tm
     components.workflow.return_value.execute.return_value.to_dict.return_value = {"workspace": "sentinel"}
 
     with mock.patch("vae.worker.load_components", return_value=components), \
-         mock.patch.object(Celery, "backend", new=property(lambda self: _NullBackend())):
+         mock.patch.object(Celery, "backend", new=property(lambda self: _NullBackend())), \
+         mock.patch("vae.worker._make_task_output_store", return_value=InMemoryTaskOutputStore()):
         result = worker.run_msd_workflow.apply(
             args=[
                 "proj-1", "plat-1", "1.0.0",
@@ -57,3 +61,31 @@ def test_run_msd_workflow_task_calls_workflow_with_workspace_keyed_by_task_id(tm
     components.workflow.return_value.execute.assert_called_once_with(
         tmp_path / "ws" / "task-eager", "proj-1", "plat-1", "1.0.0"
     )
+
+
+def _record(message: str, level: int = logging.INFO) -> logging.LogRecord:
+    return logging.LogRecord(
+        "msd.services.clone_software_units", level, __file__, 1, message, None, None
+    )
+
+
+def test_task_output_handler_appends_formatted_lines():
+    store = mock.Mock()
+    handler = worker.TaskOutputHandler(store, "task-1")
+
+    handler.emit(_record("clone: nav_app 1.0.0 cloned to /ws"))
+
+    store.append.assert_called_once()
+    task_id, line = store.append.call_args.args
+    assert task_id == "task-1"
+    assert re.fullmatch(
+        r"\d{2}:\d{2}:\d{2} INFO     clone: nav_app 1\.0\.0 cloned to /ws", line
+    )
+
+
+def test_task_output_handler_swallows_store_errors():
+    store = mock.Mock()
+    store.append.side_effect = RuntimeError("redis down")
+    handler = worker.TaskOutputHandler(store, "task-1")
+
+    handler.emit(_record("clone: nav_app 1.0.0 cloned to /ws"))  # must not raise

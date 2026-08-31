@@ -205,6 +205,17 @@
       letter-spacing: .2em;
       color: rgba(4,7,13,.7);
     }
+    .cancel-btn {
+      background: transparent;
+      border: 1px solid rgba(255,71,87,.5);
+      color: #ff8095;
+      box-shadow: 0 0 16px -8px rgba(255,71,87,.6);
+      transition: box-shadow .25s ease, transform .15s ease, filter .2s ease;
+      line-height: 1.2;
+    }
+    .cancel-btn:hover { box-shadow: 0 0 24px -6px rgba(255,71,87,.8); filter: brightness(1.1); color: #ff9cab; }
+    .cancel-btn:active { transform: translateY(1px) scale(.99); }
+    .cancel-btn:disabled { opacity: .5; }
 
     .card-topbar {
       top: 1rem;
@@ -299,6 +310,24 @@
     }
     .run-units .login-error {
       margin: .3rem;
+    }
+    .run-output {
+      overflow-y: auto;
+      max-height: 10rem;
+      border: 1px solid rgba(53,231,255,.25);
+      border-radius: .5rem;
+      background: rgba(4,7,13,.55);
+      padding: .5rem .6rem;
+      margin-bottom: .75rem;
+      text-align: left;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+      font-size: .65rem;
+      line-height: 1.5;
+      color: rgba(103,232,249,.85);
+      white-space: pre-wrap;
+      word-break: break-word;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(53,231,255,.4) transparent;
     }
     .run-count {
       flex: none;
@@ -539,13 +568,20 @@
             </div>
           </div>
 
+          <div id="runOutput" class="run-output d-none" aria-live="polite"></div>
+
           <p id="runStatus" class="login-subtitle text-uppercase mb-3"></p>
 
           <div id="runResult" class="text-start small text-white mb-3 d-none"></div>
 
-          <button type="button" id="runSubmitBtn" class="login-btn btn w-100 rounded-3 py-2 fw-semibold">
-            <span class="d-block text-uppercase fs-6 mb-1">Run</span>
-          </button>
+          <div class="d-flex gap-2">
+            <button type="button" id="runCancelBtn" class="cancel-btn btn rounded-3 py-2 fw-semibold d-none">
+              <span class="d-block text-uppercase fs-6">Cancel</span>
+            </button>
+            <button type="button" id="runSubmitBtn" class="login-btn btn w-100 rounded-3 py-2 fw-semibold">
+              <span class="d-block text-uppercase fs-6 mb-1">Run</span>
+            </button>
+          </div>
         </div>
       {% endcall %}
 
@@ -573,6 +609,8 @@
       const runStatus = document.getElementById('runStatus');
       const runResult = document.getElementById('runResult');
       const runSubmitBtn = document.getElementById('runSubmitBtn');
+      const runCancelBtn = document.getElementById('runCancelBtn');
+      const runOutput = document.getElementById('runOutput');
       const runUnits = document.getElementById('runUnits');
       const runUnitsCount = document.getElementById('runUnitsCount');
       const runUnitsPlaceholder = document.getElementById('runUnitsPlaceholder');
@@ -581,6 +619,9 @@
 
       let sourceRepoDefaultAddress = ''; // carried from login through the config-db step
       let pollTimer = null;
+      let currentTaskId = null;         // the run currently being polled (null when idle)
+      let outputSource = null;         // EventSource streaming the task's output lines
+      let runOutputLineCount = 0;      // lines rendered into the console
       let runUnitData = [];              // pre-run inventory preview for the selection
       let unitRows = new Map();          // unit_name -> list row element
       let runUnitsToken = 0;             // invalidates superseded units-list loads
@@ -848,6 +889,13 @@
 
       function resetRunCard() {
         clearInterval(pollTimer);
+        pollTimer = null;
+        currentTaskId = null;
+        closeOutputStream();
+        runOutput.innerHTML = '';
+        runOutputLineCount = 0;
+        runOutput.classList.add('d-none');
+        runCancelBtn.classList.add('d-none');
         runUnitsToken++; // invalidate any in-flight units load
         runUnitData = [];
         unitRows = new Map();
@@ -890,32 +938,72 @@
         runResult.classList.remove('d-none');
       }
 
+      function closeOutputStream() {
+        if (outputSource) {
+          outputSource.close();
+          outputSource = null;
+        }
+      }
+
+      function appendOutputLine(line) {
+        const row = document.createElement('div');
+        row.textContent = line; // textContent only — never HTML
+        runOutput.appendChild(row);
+        runOutputLineCount++;
+        runOutput.classList.remove('d-none');
+        runOutput.scrollTop = runOutput.scrollHeight;
+      }
+
+      function openOutputStream(taskId) {
+        closeOutputStream();
+        const source = new EventSource(`/api/msd/tasks/${encodeURIComponent(taskId)}/output`);
+        source.onmessage = (event) => appendOutputLine(event.data);
+        source.addEventListener('done', () => closeOutputStream());
+        // On error, leave it to EventSource's auto-retry: the server resumes
+        // from the last delivered event id (no replayed lines). The stream is
+        // closed by the status poll's terminal/error path and by resetRunCard.
+        outputSource = source;
+      }
+
+      function stopRunPolling() {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        closeOutputStream();
+        runCancelBtn.classList.add('d-none');
+        runSubmitBtn.disabled = false;
+      }
+
+      function finishRun(state, body) {
+        stopRunPolling();
+        if (state === 'SUCCESS') {
+          runStatus.textContent = 'Completed';
+          renderRunResult(body.result || {});
+        } else if (state === 'FAILURE') {
+          runStatus.textContent = body.error || 'Run failed';
+        } else {
+          // REVOKED, or the backend not yet reflecting the worker's
+          // revocation mark right after a successful cancel
+          runStatus.textContent = 'Cancelled';
+        }
+      }
+
       async function pollTask(taskId) {
         try {
           const res = await fetch(`/api/msd/tasks/${encodeURIComponent(taskId)}`, { credentials: 'same-origin' });
           const body = await res.json().catch(() => ({}));
           if (!res.ok) {
-            clearInterval(pollTimer);
+            stopRunPolling();
             runStatus.textContent = body.error || 'Failed to check run status';
-            runSubmitBtn.disabled = false;
             return;
           }
-          if (body.state === 'SUCCESS') {
-            clearInterval(pollTimer);
-            runStatus.textContent = 'Completed';
-            renderRunResult(body.result || {});
-            runSubmitBtn.disabled = false;
-          } else if (body.state === 'FAILURE') {
-            clearInterval(pollTimer);
-            runStatus.textContent = body.error || 'Run failed';
-            runSubmitBtn.disabled = false;
+          if (body.state === 'SUCCESS' || body.state === 'FAILURE' || body.state === 'REVOKED') {
+            finishRun(body.state, body);
           } else {
             runStatus.textContent = body.state === 'STARTED' ? 'Running…' : 'Queued…';
           }
         } catch (err) {
-          clearInterval(pollTimer);
+          stopRunPolling();
           runStatus.textContent = 'Unable to reach the server';
-          runSubmitBtn.disabled = false;
         }
       }
 
@@ -937,7 +1025,10 @@
           });
           const body = await res.json().catch(() => ({}));
           if (res.ok) {
+            currentTaskId = body.task_id;
             runStatus.textContent = 'Queued…';
+            runCancelBtn.classList.remove('d-none');
+            openOutputStream(body.task_id);
             pollTimer = setInterval(() => pollTask(body.task_id), 1500);
           } else {
             runStatus.textContent = body.error || 'Run failed to start';
@@ -946,6 +1037,29 @@
         } catch (err) {
           runStatus.textContent = 'Unable to reach the server';
           runSubmitBtn.disabled = false;
+        }
+      });
+
+      runCancelBtn.addEventListener('click', async () => {
+        runCancelBtn.disabled = true;
+        try {
+          const res = await fetch(`/api/msd/tasks/${encodeURIComponent(currentTaskId)}/cancel`, {
+            method: 'POST',
+            credentials: 'same-origin',
+          });
+          const body = await res.json().catch(() => ({}));
+          if (res.ok) {
+            // SUCCESS/FAILURE: the task finished while the cancel was in
+            // flight; anything else: the revocation was accepted, done.
+            finishRun(body.state, body);
+          } else {
+            // keep polling — the task is presumably still running
+            runStatus.textContent = body.error || 'Cancel failed';
+          }
+        } catch (err) {
+          runStatus.textContent = 'Unable to reach the server';
+        } finally {
+          runCancelBtn.disabled = false;
         }
       });
 

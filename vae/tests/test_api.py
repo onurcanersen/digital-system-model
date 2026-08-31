@@ -178,6 +178,103 @@ def test_unknown_task_id_reports_pending():
     assert resp.get_json() == {"task_id": "does-not-exist", "state": "PENDING"}
 
 
+def test_cancel_queued_task_reports_revoked():
+    client = _client()
+    _login(client)  # no data source connections needed for a broker op
+
+    resp = client.post("/api/msd/tasks/does-not-exist/cancel")
+
+    assert resp.status_code == 200
+    assert resp.get_json() == {"task_id": "does-not-exist", "state": "REVOKED"}
+
+
+def test_cancel_completed_task_reports_its_final_state():
+    client = _client()
+    _login(client)
+    _connect_data_sources(client)
+
+    task_id = client.post("/api/msd/run", json=SELECTION).get_json()["task_id"]
+    resp = client.post(f"/api/msd/tasks/{task_id}/cancel")
+
+    assert resp.status_code == 200
+    assert resp.get_json()["state"] == "SUCCESS"
+
+
+def test_cancel_requires_login():
+    resp = _client().post("/api/msd/tasks/does-not-exist/cancel")
+
+    assert resp.status_code == 401
+    assert resp.get_json() == {"error": "authentication required"}
+
+
+def test_cancel_failure_maps_to_502():
+    class _BrokenCancelRunner(FakeTaskRunner):
+        def cancel(self, task_id):
+            raise RuntimeError("broker down")
+
+    components = Components(
+        defaults=_DEFAULTS,
+        config_repo_factory=lambda ds: FakeConfigManagementRepository(),
+        msd_task_runner=_BrokenCancelRunner(run=lambda **ids: None),
+        auth_repo=InMemoryLdapAuthRepository(),
+    )
+    client = _client(components)
+    _login(client)
+
+    resp = client.post("/api/msd/tasks/does-not-exist/cancel")
+
+    assert resp.status_code == 502
+    assert "broker down" in resp.get_json()["error"]
+
+
+def _completed_task_id(components: Components, client) -> str:
+    _connect_data_sources(client)
+    return client.post("/api/msd/run", json=SELECTION).get_json()["task_id"]
+
+
+def test_output_stream_serves_lines_and_done():
+    components = _components()
+    client = _client(components)
+    _login(client)
+    task_id = _completed_task_id(components, client)
+    components.task_output_store.append(task_id, "clone: nav_app 1.0.0 cloned to /ws")
+    components.task_output_store.append(task_id, "generate: wrote model setup data to /ws/model_setup_data.json")
+
+    resp = client.get(f"/api/msd/tasks/{task_id}/output")
+
+    assert resp.status_code == 200
+    assert resp.content_type.startswith("text/event-stream")
+    body = resp.get_data(as_text=True)
+    assert "data: clone: nav_app 1.0.0 cloned to /ws" in body
+    assert "data: generate: wrote model setup data to /ws/model_setup_data.json" in body
+    assert "event: done" in body
+    assert "data: SUCCESS" in body
+
+
+def test_output_stream_resumes_from_last_event_id():
+    components = _components()
+    client = _client(components)
+    _login(client)
+    task_id = _completed_task_id(components, client)
+    for line in ("line one", "line two", "line three"):
+        components.task_output_store.append(task_id, line)
+
+    resp = client.get(f"/api/msd/tasks/{task_id}/output", headers={"Last-Event-ID": "1"})
+
+    body = resp.get_data(as_text=True)
+    assert "line one" not in body
+    assert "data: line two" in body
+    assert "data: line three" in body
+    assert "event: done" in body
+
+
+def test_output_stream_requires_login():
+    resp = _client().get("/api/msd/tasks/does-not-exist/output")
+
+    assert resp.status_code == 401
+    assert resp.get_json() == {"error": "authentication required"}
+
+
 def test_selection_body_validation():
     client = _client()
     _login(client)

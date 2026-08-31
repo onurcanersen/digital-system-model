@@ -47,6 +47,13 @@ class ITaskRunner(ABC):
         """Current state/result of a submitted execution. Unknown ids report
         as PENDING (the backend cannot distinguish unknown from queued)."""
 
+    @abstractmethod
+    def cancel(self, task_id: str) -> TaskStatus:
+        """Revoke a submitted execution: a queued one will not run, a running
+        one is terminated in its worker process. Returns the task's current
+        status (the backend may still report the pre-revocation state for a
+        moment, since workers apply the revocation asynchronously)."""
+
 
 def _failure_message(result) -> str:
     """Human-readable error for a FAILURE state. Celery hands back the
@@ -96,3 +103,11 @@ class CeleryTaskRunner(ITaskRunner):
                 result = {"value": result} if result is not None else None
             return TaskStatus(task_id=task_id, state=state, result=result)
         return TaskStatus(task_id=task_id, state=state)
+
+    def cancel(self, task_id: str) -> TaskStatus:
+        # terminate=True kills the worker child process if the task is already
+        # running (SIGTERM); queued tasks are dropped by the worker on pickup.
+        # Fire-and-forget (no reply wait) — the worker marks the task REVOKED
+        # in the result backend a moment later.
+        AsyncResult(task_id, app=self.app).revoke(terminate=True)
+        return self.status(task_id)

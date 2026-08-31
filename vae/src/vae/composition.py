@@ -25,8 +25,11 @@ from msd.domain.data_source import DataSourceConfig, SourceType
 from msd.ports.config_management_repository import IConfigManagementRepository
 
 from vae.adapters.in_memory_ldap_auth_repository import InMemoryLdapAuthRepository
+from vae.adapters.in_memory_task_output_store import InMemoryTaskOutputStore
+from vae.adapters.redis_task_output_store import RedisTaskOutputStore
 from vae.config import DEFAULT_CONFIG_PATH, get_config
 from vae.ports.auth_repository import IAuthRepository
+from vae.ports.task_output_store import ITaskOutputStore
 from vae.services.authenticate_user import AuthenticateUser
 from vae.task_runner import CeleryTaskRunner, ITaskRunner
 
@@ -37,6 +40,7 @@ class Components:
     config_repo_factory: Callable[[DataSourceConfig], IConfigManagementRepository]
     msd_task_runner: ITaskRunner
     auth_repo: IAuthRepository
+    task_output_store: ITaskOutputStore = field(default_factory=InMemoryTaskOutputStore)
     connections: Dict[str, Dict[SourceType, DataSourceConfig]] = field(default_factory=dict)
 
     def authenticate_user(self) -> AuthenticateUser:
@@ -86,4 +90,5 @@ def load_components() -> Components:
         config_repo_factory=MysqlConfigManagementRepository.from_data_source_config,
         msd_task_runner=CeleryTaskRunner(),
         auth_repo=InMemoryLdapAuthRepository(),
+        task_output_store=RedisTaskOutputStore(config.worker.result_backend),
     )

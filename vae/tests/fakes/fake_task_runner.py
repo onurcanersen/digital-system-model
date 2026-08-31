@@ -51,3 +51,14 @@ class FakeTaskRunner(ITaskRunner):
         if known is not None:
             return known
         return TaskStatus(task_id=task_id, state="PENDING")
+
+    def cancel(self, task_id: str) -> TaskStatus:
+        # The fake runs synchronously, so a known task is always already
+        # terminal — cancelling it is a no-op. Unknown (i.e. "queued") ids
+        # are marked REVOKED, mirroring the real runner's outcome.
+        known = self._tasks.get(task_id)
+        if known is not None and known.state in ("SUCCESS", "FAILURE"):
+            return known
+        revoked = TaskStatus(task_id=task_id, state="REVOKED")
+        self._tasks[task_id] = revoked
+        return revoked

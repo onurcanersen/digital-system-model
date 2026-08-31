@@ -14,6 +14,7 @@ default is the CPU count, as per Celery)
 """
 
 import argparse
+import logging
 
 from celery import Celery
 
@@ -23,9 +24,46 @@ from msd.composition import load_components
 from msd.config import get_config as get_msd_config
 from msd.domain.data_source import DataSourceConfig, SourceType
 
+from vae.adapters.redis_task_output_store import RedisTaskOutputStore
 from vae.config import get_config
+from vae.ports.task_output_store import ITaskOutputStore
+
+logger = logging.getLogger(__name__)
 
 RESULT_EXPIRES_SECONDS = 86400
+
+_TASK_OUTPUT_FORMAT = "%(asctime)s %(levelname)-8s %(message)s"
+_TASK_OUTPUT_DATEFMT = "%H:%M:%S"
+
+
+class TaskOutputHandler(logging.Handler):
+    """Captures the task's log records (INFO+) into an ITaskOutputStore so
+    the API can stream them to the UI. A store failure is logged, never
+    raised: the task's outcome must not depend on the output channel."""
+
+    def __init__(self, store: ITaskOutputStore, task_id: str):
+        super().__init__(level=logging.INFO)
+        self.setFormatter(logging.Formatter(_TASK_OUTPUT_FORMAT, datefmt=_TASK_OUTPUT_DATEFMT))
+        self._store = store
+        self._task_id = task_id
+        self._in_emit = False
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if self._in_emit:
+            return
+        self._in_emit = True
+        try:
+            self._store.append(self._task_id, self.format(record))
+        except Exception:
+            logger.warning("task output: failed to record line for task %s", self._task_id)
+        finally:
+            self._in_emit = False
+
+
+def _make_task_output_store() -> ITaskOutputStore:
+    # The result-backend db holds per-task state, so captured output lives
+    # there too (TTL matches result_expires, via the adapter's default).
+    return RedisTaskOutputStore(get_config().worker.result_backend)
 
 
 def make_celery() -> Celery:
@@ -68,33 +106,42 @@ def run_msd_workflow(
 
     Connects to config_mgmt_db and source_code_repo with the credentials the
     user supplied at login time, rather than any static config — msd itself
-    no longer holds connection info for either."""
-    vae_defaults = {c.source_type: c for c in get_config().data_sources}
+    no longer holds connection info for either.
 
-    config_mgmt_ds = DataSourceConfig(
-        source_type=SourceType.CONFIG_MGMT_DB,
-        source_name=vae_defaults[SourceType.CONFIG_MGMT_DB].source_name,
-        access_method=vae_defaults[SourceType.CONFIG_MGMT_DB].access_method,
-        connection_address=config_mgmt_address,
-        user_info=f"{config_mgmt_username}:{config_mgmt_password}",
-    )
-    config_repo = MysqlConfigManagementRepository.from_data_source_config(config_mgmt_ds)
+    Log output (INFO+) is captured for the run's duration into the task's
+    output store, so the API can stream it to the UI (see
+    GET /api/msd/tasks/<task_id>/output)."""
+    output_handler = TaskOutputHandler(_make_task_output_store(), self.request.id)
+    logging.getLogger().addHandler(output_handler)
+    try:
+        vae_defaults = {c.source_type: c for c in get_config().data_sources}
 
-    source_repo_ds = DataSourceConfig(
-        source_type=SourceType.SOURCE_CODE_REPO,
-        source_name=vae_defaults[SourceType.SOURCE_CODE_REPO].source_name,
-        access_method=vae_defaults[SourceType.SOURCE_CODE_REPO].access_method,
-        connection_address=source_repo_address,
-        user_info=f"{source_repo_username}:{source_repo_password}",
-    )
-    source_repo = GitSourceCodeRepository.from_data_source_config(
-        source_repo_ds, get_msd_config().analyzer.makefile_include_patterns
-    )
+        config_mgmt_ds = DataSourceConfig(
+            source_type=SourceType.CONFIG_MGMT_DB,
+            source_name=vae_defaults[SourceType.CONFIG_MGMT_DB].source_name,
+            access_method=vae_defaults[SourceType.CONFIG_MGMT_DB].access_method,
+            connection_address=config_mgmt_address,
+            user_info=f"{config_mgmt_username}:{config_mgmt_password}",
+        )
+        config_repo = MysqlConfigManagementRepository.from_data_source_config(config_mgmt_ds)
 
-    components = load_components(config_repo=config_repo, source_repo=source_repo)
-    return components.workflow().execute(
-        components.workspace / self.request.id, project_id, platform_id, version_id
-    ).to_dict()
+        source_repo_ds = DataSourceConfig(
+            source_type=SourceType.SOURCE_CODE_REPO,
+            source_name=vae_defaults[SourceType.SOURCE_CODE_REPO].source_name,
+            access_method=vae_defaults[SourceType.SOURCE_CODE_REPO].access_method,
+            connection_address=source_repo_address,
+            user_info=f"{source_repo_username}:{source_repo_password}",
+        )
+        source_repo = GitSourceCodeRepository.from_data_source_config(
+            source_repo_ds, get_msd_config().analyzer.makefile_include_patterns
+        )
+
+        components = load_components(config_repo=config_repo, source_repo=source_repo)
+        return components.workflow().execute(
+            components.workspace / self.request.id, project_id, platform_id, version_id
+        ).to_dict()
+    finally:
+        logging.getLogger().removeHandler(output_handler)
 
 
 def main() -> None:

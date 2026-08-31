@@ -19,6 +19,8 @@ Flask endpoints:
   GET  /api/projects/<project_id>/platforms/<platform_id>/versions/<version_id>/units  [login + config_mgmt_db connected]
   POST /api/msd/run   body {"project_id", "platform_id", "version_id"}  [login + both data sources connected]
   GET  /api/msd/tasks/<task_id>                                        [login required]
+  GET  /api/msd/tasks/<task_id>/output                                 [login required]
+  POST /api/msd/tasks/<task_id>/cancel                                 [login required]
 
 Run with:  vae-api  (or: python -m vae.api)
 The API host/port/session secret come from the [api] section of vae's config.ini.
@@ -28,8 +30,9 @@ from __future__ import annotations
 
 import functools
 import logging
+import time
 
-from flask import Flask, jsonify, render_template, request, session
+from flask import Flask, Response, jsonify, render_template, request, session
 
 from msd.domain.data_source import SourceType
 from msd.ports.config_management_repository import ConfigManagementAccessError
@@ -42,6 +45,13 @@ logger = logging.getLogger(__name__)
 _SELECTION = ("project_id", "platform_id", "version_id")
 _CREDENTIALS = ("username", "password")
 _CONNECT_FIELDS = ("connection_address", "username", "password")
+
+# Output-stream (SSE) pacing: how often a still-running task's store is
+# re-checked, and the hard cap on one stream (leak guard — a well-behaved
+# EventSource closes on the `done` event or when the card is reset).
+_OUTPUT_STREAM_TICK_SECONDS = 0.5
+_OUTPUT_STREAM_MAX_SECONDS = 3600
+_OUTPUT_TERMINAL_STATES = ("SUCCESS", "FAILURE", "REVOKED")
 
 
 def login_required(view):
@@ -244,6 +254,57 @@ def create_app(components: Components = None) -> Flask:
         if status.error is not None:
             payload["error"] = status.error
         return jsonify(payload)
+
+    @app.route("/api/msd/tasks/<task_id>/cancel", methods=["POST"])
+    @login_required
+    def api_msd_task_cancel(task_id):
+        try:
+            status = components.msd_task_runner.cancel(task_id)
+        except Exception as exc:
+            logger.warning("msd/tasks/%s: cancellation failed: %s", task_id, exc)
+            return jsonify({"error": str(exc)}), 502
+        payload = {"task_id": status.task_id, "state": status.state}
+        if status.result is not None:
+            payload["result"] = status.result
+        if status.error is not None:
+            payload["error"] = status.error
+        return jsonify(payload)
+
+    @app.route("/api/msd/tasks/<task_id>/output")
+    @login_required
+    def api_msd_task_output(task_id):
+        # EventSource reconnects after a dropped stream carrying the last
+        # event id it processed, so the stream resumes at that line instead
+        # of replaying what the client already has.
+        try:
+            cursor = int(request.headers.get("Last-Event-ID") or 0)
+        except ValueError:
+            cursor = 0
+
+        def stream():
+            nonlocal cursor
+            deadline = time.monotonic() + _OUTPUT_STREAM_MAX_SECONDS
+            while time.monotonic() < deadline:
+                try:
+                    lines = components.task_output_store.lines(task_id)
+                    state = components.msd_task_runner.status(task_id).state
+                except Exception:
+                    # A store/status blip skips this tick; the stream stays up.
+                    time.sleep(_OUTPUT_STREAM_TICK_SECONDS)
+                    continue
+                for index, line in enumerate(lines[cursor:], start=cursor):
+                    yield f"id: {index}\ndata: {line}\n\n"
+                    cursor = index + 1
+                if state in _OUTPUT_TERMINAL_STATES:
+                    yield f"event: done\ndata: {state}\n\n"
+                    return
+                time.sleep(_OUTPUT_STREAM_TICK_SECONDS)
+
+        return Response(
+            stream(),
+            mimetype="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     return app
 

@@ -4,7 +4,7 @@ from unittest import mock
 
 from celery import states
 
-from vae.task_runner import CeleryTaskRunner
+from vae.task_runner import CeleryTaskRunner, TaskStatus
 
 
 class _FakeAsyncResult:
@@ -35,6 +35,17 @@ def test_submit_run_delegates_to_celery_delay():
         "localhost:3306/cmdb", "dsm", "dsm",
         "http://localhost:3001/dsm-src", "dsm", "dsm",
     )
+
+
+def test_cancel_revokes_with_terminate_and_reports_status():
+    runner = CeleryTaskRunner()
+    with mock.patch("vae.task_runner.AsyncResult") as async_result_cls:
+        async_result = async_result_cls.return_value
+        async_result.state = states.REVOKED
+        status = runner.cancel("t-1")
+
+    async_result.revoke.assert_called_once_with(terminate=True)
+    assert status == TaskStatus(task_id="t-1", state="REVOKED")
 
 
 def test_status_success_carries_result_dict():
