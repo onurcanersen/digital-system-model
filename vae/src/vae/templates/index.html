@@ -608,6 +608,7 @@
       const configDbSubmitBtn = document.getElementById('configDbSubmitBtn');
       const selectionCard = document.getElementById('selectionCard');
       const selectionError = document.getElementById('selectionError');
+      const selectionSubmitBtn = document.getElementById('selectionSubmitBtn');
       const projectSelect = selectionCard.elements['projectId'];
       const platformSelect = selectionCard.elements['platformId'];
       const versionSelect = selectionCard.elements['versionId'];
@@ -639,6 +640,12 @@
       function crossfade(hideEl, showEl) {
         hideEl.classList.add('d-none');
         showEl.classList.remove('d-none');
+      }
+
+      const wizardCards = [loginCard, configDbCard, selectionCard, sourceRepoCard, runCard];
+
+      function showOnlyCard(el) {
+        wizardCards.forEach((card) => card.classList.toggle('d-none', card !== el));
       }
 
       function showError(message) {
@@ -690,16 +697,18 @@
         try {
           const res = await fetch(url, { credentials: 'same-origin' });
           const body = await res.json().catch(() => ({}));
-          if (loadTokens.get(select) !== token) return; // superseded by a newer request
+          if (loadTokens.get(select) !== token) return 'error'; // superseded by a newer request
           if (res.ok) {
             const items = body.projects || body.platforms || body.versions || [];
             populateSelect(select, items, valueKey, labelKey, effectiveKey);
-          } else {
-            showSelectionError(body.error || 'Failed to load options');
+            return 'ok';
           }
+          showSelectionError(body.error || 'Failed to load options');
+          return 'error';
         } catch (err) {
-          if (loadTokens.get(select) !== token) return; // superseded by a newer request
+          if (loadTokens.get(select) !== token) return 'error'; // superseded by a newer request
           showSelectionError('Unable to reach the server');
+          return 'error';
         }
       }
 
@@ -707,24 +716,59 @@
         resetSelect(projectSelect, 'PROJECT', false);
         resetSelect(platformSelect, 'PLATFORM', true);
         resetSelect(versionSelect, 'VERSION', true);
-        loadOptions(projectSelect, '/api/projects', 'project_id', 'name');
+        return loadOptions(projectSelect, '/api/projects', 'project_id', 'name');
       }
 
       function loadPlatforms(projectId) {
         resetSelect(platformSelect, 'PLATFORM', true);
         resetSelect(versionSelect, 'VERSION', true);
-        if (!projectId) return;
-        loadOptions(platformSelect, `/api/projects/${encodeURIComponent(projectId)}/platforms`, 'platform_id', 'name');
+        if (!projectId) return 'error';
+        return loadOptions(platformSelect, `/api/projects/${encodeURIComponent(projectId)}/platforms`, 'platform_id', 'name');
       }
 
       function loadVersions(projectId, platformId) {
         resetSelect(versionSelect, 'VERSION', true);
-        if (!platformId) return;
-        loadOptions(
+        if (!platformId) return 'error';
+        return loadOptions(
           versionSelect,
           `/api/projects/${encodeURIComponent(projectId)}/platforms/${encodeURIComponent(platformId)}/versions`,
           'version_id', 'label', 'is_effective'
         );
+      }
+
+      function selectOption(select, value) {
+        if (!value) return false;
+        for (const opt of select.options) {
+          if (opt.value === value) {
+            select.value = value;
+            return true;
+          }
+        }
+        return false;
+      }
+
+      // Re-fetch the options cascade against a persisted selection, leaving the
+      // selects populated with the saved values (so Back navigation shows the
+      // remembered selection). 'indeterminate' = a fetch failed (config DB
+      // unreachable — keep the selection); 'stale' = a successful fetch did not
+      // contain one of the saved ids.
+      async function resolveStoredSelection(selection) {
+        if (!selection || !selection.project_id || !selection.platform_id || !selection.version_id) {
+          return 'stale';
+        }
+        const projects = await loadProjects();
+        if (projects !== 'ok') return 'indeterminate';
+        if (!selectOption(projectSelect, selection.project_id)) return 'stale';
+
+        const platforms = await loadPlatforms(projectSelect.value);
+        if (platforms !== 'ok') return 'indeterminate';
+        if (!selectOption(platformSelect, selection.platform_id)) return 'stale';
+
+        const versions = await loadVersions(projectSelect.value, platformSelect.value);
+        if (versions !== 'ok') return 'indeterminate';
+        if (!selectOption(versionSelect, selection.version_id)) return 'stale';
+
+        return 'ok';
       }
 
       projectSelect.addEventListener('change', () => loadPlatforms(projectSelect.value));
@@ -924,6 +968,17 @@
         resetRunCard();
         loadRunUnits();
         crossfade(sourceRepoCard, runCard);
+      }
+
+      // Re-attach the run card to a run the server still tracks (resume after a
+      // refresh/reload): the output stream replays the stored lines and sends
+      // a status snapshot, so this settles into a live tail or, for a
+      // terminal task, the completed/failed/cancelled state via finishRun.
+      function attachActiveRun(task) {
+        currentTaskId = task.task_id;
+        runStatus.textContent = 'Reconnecting…';
+        runCancelBtn.classList.remove('d-none');
+        openOutputStream(task.task_id);
       }
 
       function renderRunResult(result) {
@@ -1159,9 +1214,32 @@
         }
       });
 
-      selectionCard.addEventListener('submit', (e) => {
+      selectionCard.addEventListener('submit', async (e) => {
         e.preventDefault();
-        showSourceRepoCard();
+        selectionError.classList.add('d-none');
+        selectionSubmitBtn.disabled = true;
+        try {
+          const res = await fetch('/api/selection', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({
+              project_id: projectSelect.value,
+              platform_id: platformSelect.value,
+              version_id: versionSelect.value,
+            }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (res.ok) {
+            showSourceRepoCard();
+          } else {
+            showSelectionError(body.error || 'Failed to save selection');
+          }
+        } catch (err) {
+          showSelectionError('Unable to reach the server');
+        } finally {
+          selectionSubmitBtn.disabled = false;
+        }
       });
 
       sourceRepoCard.addEventListener('submit', async (e) => {
@@ -1209,6 +1287,7 @@
         crossfade(sourceRepoCard, selectionCard);
       });
       document.getElementById('runCard-back').addEventListener('click', () => {
+        sourceRepoCard.elements['sourceRepoAddress'].value = sourceRepoDefaultAddress;
         crossfade(runCard, sourceRepoCard);
       });
 
@@ -1231,15 +1310,54 @@
         sourceRepoDefaultAddress = defaults.source_code_repo || '';
         loginCard.classList.add('d-none');
 
-        if (sessionState.config_mgmt_db_connected) {
-          // Project/platform/version selection isn't persisted server-side,
-          // so a resumed session always re-enters at selection, even if the
-          // source-code-repo connection also survived the reload.
+        // Resume at the first incomplete step: login → config-mgmt-DB connect →
+        // selection → source-code-repo connect → run card.
+        if (!sessionState.config_mgmt_db_connected) {
+          showOnlyCard(configDbCard);
+          return;
+        }
+
+        // The selection is persisted server-side; the options cascade
+        // re-validates it (and leaves the selects populated with the saved
+        // values, so Back navigation shows the remembered selection).
+        let selection = sessionState.selection;
+        if (selection) {
+          showOnlyCard(selectionCard);
+          const outcome = await resolveStoredSelection(selection);
+          if (outcome === 'indeterminate') return; // config DB unreachable — selection retained
+          if (outcome === 'stale') {
+            try {
+              await fetch('/api/selection', { method: 'DELETE', credentials: 'same-origin' });
+            } catch (err) { /* best effort — re-resolves as stale on the next load */ }
+            selection = null;
+          }
+        }
+
+        if (!selection) {
           selectionError.classList.add('d-none');
           loadProjects();
-          selectionCard.classList.remove('d-none');
-        } else {
-          configDbCard.classList.remove('d-none');
+          showOnlyCard(selectionCard);
+          return;
+        }
+
+        if (!sessionState.source_code_repo_connected) {
+          showSourceRepoCard();
+          return;
+        }
+
+        // All steps complete: land on the run card, re-attaching to the run the
+        // server still tracks. Prefill the selects from the task's own
+        // selection snapshot so the summary and unit preview describe the run.
+        if (sessionState.active_task) {
+          const task = sessionState.active_task;
+          selectOption(projectSelect, task.project_id);
+          selectOption(platformSelect, task.platform_id);
+          selectOption(versionSelect, task.version_id);
+        }
+        showRunCard();
+        showOnlyCard(runCard);
+        if (sessionState.active_task) {
+          attachActiveRun(sessionState.active_task);
         }
       })();
     });

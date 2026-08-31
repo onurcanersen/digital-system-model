@@ -13,6 +13,8 @@ Flask endpoints:
   POST /api/logout
   POST /api/data-sources/connect/config-mgmt-db        body {"connection_address", "username", "password"}  [login required]
   POST /api/data-sources/connect/source-code-repo      body {"connection_address", "username", "password"}  [login + config_mgmt_db connected]
+  POST /api/selection   body {"project_id", "platform_id", "version_id"}  [login + config_mgmt_db connected]
+  DELETE /api/selection                                                    [login + config_mgmt_db connected]
   GET  /api/projects                                                    [login + config_mgmt_db connected]
   GET  /api/projects/<project_id>/platforms                             [login + config_mgmt_db connected]
   GET  /api/projects/<project_id>/platforms/<platform_id>/versions      [login + config_mgmt_db connected]
@@ -42,6 +44,7 @@ from msd.ports.config_management_repository import ConfigManagementAccessError
 from vae.composition import Components, load_components
 from vae.config import get_config
 from vae.task_runner import TaskStatus
+from vae.worker import RESULT_EXPIRES_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +152,15 @@ def create_app(components: Components = None) -> Flask:
         if "username" not in session:
             return jsonify({"authenticated": False})
         connections = _connections()
+        active_task = session.get("active_task")
+        if (
+            active_task is not None
+            and time.time() - active_task["submitted_at"] > RESULT_EXPIRES_SECONDS
+        ):
+            # Past Celery's result expiry the backend holds neither the task's
+            # state nor its result, so the run is untrackable from the UI.
+            session.pop("active_task", None)
+            active_task = None
         return jsonify({
             "authenticated": True,
             "username": session["username"],
@@ -159,6 +171,8 @@ def create_app(components: Components = None) -> Flask:
             },
             "config_mgmt_db_connected": SourceType.CONFIG_MGMT_DB in connections,
             "source_code_repo_connected": SourceType.SOURCE_CODE_REPO in connections,
+            "selection": session.get("selection"),
+            "active_task": active_task,
         })
 
     @app.route("/api/logout", methods=["POST"])
@@ -178,6 +192,9 @@ def create_app(components: Components = None) -> Flask:
         except ConfigManagementAccessError as exc:
             return jsonify({"error": str(exc)}), 502
         session["conn_token"] = token
+        # A selection belongs to this config-mgmt-DB connection's epoch; a new
+        # connection (possibly to a different database) invalidates it.
+        session.pop("selection", None)
         return jsonify({"connected": True})
 
     @app.route("/api/data-sources/connect/source-code-repo", methods=["POST"])
@@ -189,6 +206,26 @@ def create_app(components: Components = None) -> Flask:
             return error
         components.connect_source_repo(session["conn_token"], body)
         return jsonify({"connected": True})
+
+    @app.route("/api/selection", methods=["POST"])
+    @login_required
+    @config_db_required
+    def api_set_selection():
+        body = request.get_json(silent=True, force=True)
+        if not isinstance(body, dict):
+            return jsonify({"error": "request body must be a JSON object"}), 400
+        missing = [key for key in _SELECTION if not body.get(key)]
+        if missing:
+            return jsonify({"error": f"missing field(s): {', '.join(missing)}"}), 400
+        session["selection"] = {key: body[key] for key in _SELECTION}
+        return jsonify({"selection": session["selection"]})
+
+    @app.route("/api/selection", methods=["DELETE"])
+    @login_required
+    @config_db_required
+    def api_clear_selection():
+        session.pop("selection", None)
+        return "", 204
 
     @app.route("/api/projects")
     @login_required
@@ -259,6 +296,17 @@ def create_app(components: Components = None) -> Flask:
         except Exception as exc:
             logger.warning("msd/run: task submission failed: %s", exc)
             return jsonify({"error": str(exc)}), 502
+        # The UI re-attaches to this run after a refresh/reload (its output
+        # stream replays the stored lines plus a status snapshot). The task's
+        # own selection snapshot rides along so the run card can describe it
+        # even if the user's saved selection changes before the reload.
+        session["active_task"] = {
+            "task_id": task_id,
+            "project_id": body["project_id"],
+            "platform_id": body["platform_id"],
+            "version_id": body["version_id"],
+            "submitted_at": time.time(),
+        }
         return jsonify({"task_id": task_id}), 202
 
     @app.route("/api/msd/tasks/<task_id>/cancel", methods=["POST"])

@@ -57,9 +57,12 @@ Then open the UI at <http://127.0.0.1:8080>.
 | Method | Path | Description |
 | ------ | ---- | ----------- |
 | GET | `/` | Single-page UI |
+| GET | `/api/session` | Session state for resume: auth, data-source connection flags, persisted selection, and the tracked run (task id + its selection snapshot + submission time; dropped once past the worker's result expiry) |
 | GET | `/api/projects` | List projects (via msd's config-mgmt repository) |
 | GET | `/api/projects/<project_id>/platforms` | List platforms for a project |
 | GET | `/api/projects/<project_id>/platforms/<platform_id>/versions` | List versions for a platform |
+| POST | `/api/selection` | Persist the selected project/platform/version in the session; body `{"project_id", "platform_id", "version_id"}` |
+| DELETE | `/api/selection` | Clear the persisted selection (the UI clears it on resume when the options no longer exist) |
 | POST | `/api/msd/run` | Enqueue msd's clone + generate workflow; body `{"project_id", "platform_id", "version_id"}`, returns `202 {"task_id"}` |
 | GET | `/api/msd/tasks/<task_id>/output` | Server-sent run stream (SSE): output lines, `status` events pushed on state changes (with a snapshot on connect/reconnect), and a final `done` event carrying the terminal payload (state/result/error) |
 | POST | `/api/msd/tasks/<task_id>/cancel` | Cancel a queued or running task (terminates the worker process if running); returns the task state |

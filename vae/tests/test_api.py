@@ -486,3 +486,153 @@ def test_logout_clears_the_session_and_data_source_connection():
 
     _login(client)
     assert client.get("/api/projects").status_code == 401  # must reconnect data sources after re-login
+
+
+def test_session_reports_unauthenticated():
+    resp = _client().get("/api/session")
+
+    assert resp.status_code == 200
+    assert resp.get_json() == {"authenticated": False}
+
+
+def test_session_reports_connection_state_and_empty_persistence():
+    client = _client()
+    _login(client)
+    _connect_data_sources(client)
+
+    body = client.get("/api/session").get_json()
+
+    assert body["authenticated"] is True
+    assert body["username"] == "admin"
+    assert body["role"] == "admin"
+    assert body["defaults"] == {
+        "config_mgmt_db": "localhost:3306/cmdb",
+        "source_code_repo": "http://localhost:3001/dsm-src",
+    }
+    assert body["config_mgmt_db_connected"] is True
+    assert body["source_code_repo_connected"] is True
+    assert body["selection"] is None
+    assert body["active_task"] is None
+
+
+def test_set_selection_requires_login_and_config_db():
+    client = _client()
+
+    resp = client.post("/api/selection", json=SELECTION)
+    assert resp.status_code == 401
+    assert resp.get_json() == {"error": "authentication required"}
+
+    _login(client)
+    resp = client.post("/api/selection", json=SELECTION)
+    assert resp.status_code == 401
+    assert resp.get_json() == {"error": "config management database connection required"}
+
+
+def test_set_selection_validates_body():
+    client = _client()
+    _login(client)
+    _connect_config_mgmt_db(client)
+
+    resp = client.post("/api/selection", json={"project_id": "proj-1"})
+    assert resp.status_code == 400
+    assert "missing field" in resp.get_json()["error"]
+
+    resp = client.post("/api/selection", data=b"not json", content_type="application/json")
+    assert resp.status_code == 400
+
+
+def test_set_selection_is_reflected_in_session():
+    client = _client()
+    _login(client)
+    _connect_data_sources(client)
+
+    resp = client.post("/api/selection", json=SELECTION)
+    assert resp.status_code == 200
+    assert resp.get_json() == {"selection": SELECTION}
+
+    assert client.get("/api/session").get_json()["selection"] == SELECTION
+
+
+def test_delete_selection_clears_it():
+    client = _client()
+    _login(client)
+    _connect_data_sources(client)
+    client.post("/api/selection", json=SELECTION)
+
+    resp = client.delete("/api/selection")
+    assert resp.status_code == 204
+
+    assert client.get("/api/session").get_json()["selection"] is None
+
+
+def test_reconnecting_config_mgmt_db_clears_selection():
+    client = _client()
+    _login(client)
+    _connect_data_sources(client)
+    client.post("/api/selection", json=SELECTION)
+
+    resp = _connect_config_mgmt_db(client)
+    assert resp.status_code == 200
+
+    body = client.get("/api/session").get_json()
+    assert body["selection"] is None
+    assert body["source_code_repo_connected"] is False  # a new config-DB connection starts fresh
+
+
+def test_run_sets_active_task_in_session():
+    client = _client()
+    _login(client)
+    _connect_data_sources(client)
+
+    task_id = client.post("/api/msd/run", json=SELECTION).get_json()["task_id"]
+
+    active_task = client.get("/api/session").get_json()["active_task"]
+    assert active_task["task_id"] == task_id
+    assert active_task["project_id"] == SELECTION["project_id"]
+    assert active_task["platform_id"] == SELECTION["platform_id"]
+    assert active_task["version_id"] == SELECTION["version_id"]
+    assert active_task["submitted_at"] > 0
+
+
+def test_new_run_overwrites_active_task():
+    client = _client()
+    _login(client)
+    _connect_data_sources(client)
+
+    client.post("/api/msd/run", json=SELECTION)
+    second = client.post("/api/msd/run", json=SELECTION).get_json()["task_id"]
+
+    assert client.get("/api/session").get_json()["active_task"]["task_id"] == second
+
+
+def test_stale_active_task_is_dropped_from_session():
+    from vae.worker import RESULT_EXPIRES_SECONDS
+
+    client = _client()
+    _login(client)
+    _connect_data_sources(client)
+    client.post("/api/msd/run", json=SELECTION)
+    with client.session_transaction() as sess:
+        sess["active_task"]["submitted_at"] -= RESULT_EXPIRES_SECONDS + 1
+        sess.modified = True  # nested mutation doesn't flag the session itself
+
+    body = client.get("/api/session").get_json()
+    assert body["active_task"] is None
+    with client.session_transaction() as sess:
+        assert "active_task" not in sess
+
+
+def test_logout_clears_selection_and_active_task():
+    client = _client()
+    _login(client)
+    _connect_data_sources(client)
+    client.post("/api/selection", json=SELECTION)
+    client.post("/api/msd/run", json=SELECTION)
+
+    resp = client.post("/api/logout")
+    assert resp.status_code == 204
+
+    _login(client)
+    body = client.get("/api/session").get_json()
+    assert body["selection"] is None
+    assert body["active_task"] is None
