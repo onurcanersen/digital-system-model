@@ -20,6 +20,11 @@ source venv/bin/activate
 pip install -e ./msd -e ./vae
 ```
 
+Both packages are packaged with a plain `setup.py` (src layout) so the
+editable install works on both modern pip and old pip (< 21.3, e.g. stock
+Python 3.8 installs); modern pip takes the legacy path and may print a
+deprecation warning.
+
 ## Start VAE
 
 In one terminal, start the worker:
