@@ -629,9 +629,8 @@
       const passwordInput = loginCard.elements['password'];
 
       let sourceRepoDefaultAddress = ''; // carried from login through the config-db step
-      let pollTimer = null;
-      let currentTaskId = null;         // the run currently being polled (null when idle)
-      let outputSource = null;         // EventSource streaming the task's output lines
+      let currentTaskId = null;         // the run currently being tracked (null when idle)
+      let outputSource = null;         // EventSource streaming the task's output lines and status
       let runOutputLineCount = 0;      // lines rendered into the console
       let runUnitData = [];              // pre-run inventory preview for the selection
       let unitRows = new Map();          // unit_name -> list row element
@@ -899,8 +898,6 @@
       }
 
       function resetRunCard() {
-        clearInterval(pollTimer);
-        pollTimer = null;
         currentTaskId = null;
         closeOutputStream();
         runOutput.innerHTML = '';
@@ -970,16 +967,26 @@
         closeOutputStream();
         const source = new EventSource(`/api/msd/tasks/${encodeURIComponent(taskId)}/output`);
         source.onmessage = (event) => appendOutputLine(event.data);
-        source.addEventListener('done', () => closeOutputStream());
+        const handleStatus = (event) => {
+          if (currentTaskId !== taskId) return; // superseded by a newer run
+          let body;
+          try { body = JSON.parse(event.data); } catch (err) { return; }
+          if (body.state === 'SUCCESS' || body.state === 'FAILURE' || body.state === 'REVOKED') {
+            finishRun(body.state, body);
+          } else {
+            runStatus.textContent = body.state === 'STARTED' ? 'Running…' : 'Queued…';
+          }
+        };
+        source.addEventListener('status', handleStatus);
+        source.addEventListener('done', (event) => { closeOutputStream(); handleStatus(event); });
         // On error, leave it to EventSource's auto-retry: the server resumes
-        // from the last delivered event id (no replayed lines). The stream is
-        // closed by the status poll's terminal/error path and by resetRunCard.
+        // the lines from the last delivered event id and re-sends the current
+        // state as a snapshot. The stream is closed by finishRun and by
+        // resetRunCard.
         outputSource = source;
       }
 
       function stopRunPolling() {
-        clearInterval(pollTimer);
-        pollTimer = null;
         closeOutputStream();
         runCancelBtn.classList.add('d-none');
         runSubmitBtn.disabled = false;
@@ -995,39 +1002,21 @@
       }
 
       function finishRun(state, body) {
+        if (currentTaskId === null) return; // already finished (`done` after a terminal `status`)
+        const taskId = currentTaskId;
+        currentTaskId = null;
         stopRunPolling();
         if (state === 'SUCCESS') {
           runStatus.textContent = 'Completed';
           renderRunResult(body.result || {});
-          showRunDownload(currentTaskId);
+          showRunDownload(taskId);
         } else if (state === 'FAILURE') {
           runStatus.textContent = body.error || 'Run failed';
           showRunDownload(null);
         } else {
-          // REVOKED, or the backend not yet reflecting the worker's
-          // revocation mark right after a successful cancel
+          // REVOKED
           runStatus.textContent = 'Cancelled';
           showRunDownload(null);
-        }
-      }
-
-      async function pollTask(taskId) {
-        try {
-          const res = await fetch(`/api/msd/tasks/${encodeURIComponent(taskId)}`, { credentials: 'same-origin' });
-          const body = await res.json().catch(() => ({}));
-          if (!res.ok) {
-            stopRunPolling();
-            runStatus.textContent = body.error || 'Failed to check run status';
-            return;
-          }
-          if (body.state === 'SUCCESS' || body.state === 'FAILURE' || body.state === 'REVOKED') {
-            finishRun(body.state, body);
-          } else {
-            runStatus.textContent = body.state === 'STARTED' ? 'Running…' : 'Queued…';
-          }
-        } catch (err) {
-          stopRunPolling();
-          runStatus.textContent = 'Unable to reach the server';
         }
       }
 
@@ -1056,7 +1045,6 @@
             runStatus.textContent = 'Queued…';
             runCancelBtn.classList.remove('d-none');
             openOutputStream(body.task_id);
-            pollTimer = setInterval(() => pollTask(body.task_id), 1500);
           } else {
             runStatus.textContent = body.error || 'Run failed to start';
             runSubmitBtn.disabled = false;
@@ -1076,11 +1064,17 @@
           });
           const body = await res.json().catch(() => ({}));
           if (res.ok) {
-            // SUCCESS/FAILURE: the task finished while the cancel was in
-            // flight; anything else: the revocation was accepted, done.
-            finishRun(body.state, body);
+            // SUCCESS/FAILURE/REVOKED: the terminal state is already known,
+            // finish now. Otherwise the revocation was accepted but the
+            // backend still reports the pre-revocation state — the status
+            // stream delivers the terminal state a moment later.
+            if (body.state === 'SUCCESS' || body.state === 'FAILURE' || body.state === 'REVOKED') {
+              finishRun(body.state, body);
+            } else {
+              runStatus.textContent = 'Cancelling…';
+            }
           } else {
-            // keep polling — the task is presumably still running
+            // keep the stream open — the task is presumably still running
             runStatus.textContent = body.error || 'Cancel failed';
           }
         } catch (err) {

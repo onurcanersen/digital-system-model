@@ -60,12 +60,11 @@ Then open the UI at <http://127.0.0.1:8080>.
 | GET | `/api/projects` | List projects (via msd's config-mgmt repository) |
 | GET | `/api/projects/<project_id>/platforms` | List platforms for a project |
 | GET | `/api/projects/<project_id>/platforms/<platform_id>/versions` | List versions for a platform |
-| POST | `/api/msd/run` | Enqueue msd's clone + generate workflow; body `{"project_id", "platform_id", "version_id"}`, returns `202 {"task_id", "status_url"}` |
-| GET | `/api/msd/tasks/<task_id>` | Task state, result or error |
-| GET | `/api/msd/tasks/<task_id>/output` | Server-sent stream of the task's captured output lines (SSE); ends with a `done` event carrying the terminal state |
+| POST | `/api/msd/run` | Enqueue msd's clone + generate workflow; body `{"project_id", "platform_id", "version_id"}`, returns `202 {"task_id"}` |
+| GET | `/api/msd/tasks/<task_id>/output` | Server-sent run stream (SSE): output lines, `status` events pushed on state changes (with a snapshot on connect/reconnect), and a final `done` event carrying the terminal payload (state/result/error) |
 | POST | `/api/msd/tasks/<task_id>/cancel` | Cancel a queued or running task (terminates the worker process if running); returns the task state |
 
-Note: each open output stream holds one API thread for the run's duration
+Note: each open run stream holds one API thread for the run's duration
 (dev server is threaded by default; size production workers accordingly).
 
 ## Run the containers

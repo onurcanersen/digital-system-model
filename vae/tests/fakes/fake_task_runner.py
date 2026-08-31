@@ -11,8 +11,13 @@ from vae.task_runner import ITaskRunner, TaskStatus
 
 
 class FakeTaskRunner(ITaskRunner):
-    def __init__(self, run: Callable[..., dict]):
+    def __init__(self, run: Callable[..., dict], state_sequence=None):
         self._run = run
+        # Optional pre-terminal states (e.g. ["PENDING", "STARTED"]) that
+        # status() returns in order before the recorded terminal outcome, so
+        # stream tests can observe state transitions.
+        self._state_sequence = list(state_sequence) if state_sequence else []
+        self._sequence_calls = 0
         self._tasks: dict = {}
 
     def submit_run(
@@ -48,9 +53,12 @@ class FakeTaskRunner(ITaskRunner):
 
     def status(self, task_id: str) -> TaskStatus:
         known = self._tasks.get(task_id)
-        if known is not None:
-            return known
-        return TaskStatus(task_id=task_id, state="PENDING")
+        if known is None:
+            return TaskStatus(task_id=task_id, state="PENDING")
+        if self._sequence_calls < len(self._state_sequence):
+            self._sequence_calls += 1
+            return TaskStatus(task_id=task_id, state=self._state_sequence[self._sequence_calls - 1])
+        return known
 
     def cancel(self, task_id: str) -> TaskStatus:
         # The fake runs synchronously, so a known task is always already

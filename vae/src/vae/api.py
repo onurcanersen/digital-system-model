@@ -18,7 +18,6 @@ Flask endpoints:
   GET  /api/projects/<project_id>/platforms/<platform_id>/versions      [login + config_mgmt_db connected]
   GET  /api/projects/<project_id>/platforms/<platform_id>/versions/<version_id>/units  [login + config_mgmt_db connected]
   POST /api/msd/run   body {"project_id", "platform_id", "version_id"}  [login + both data sources connected]
-  GET  /api/msd/tasks/<task_id>                                        [login required]
   GET  /api/msd/tasks/<task_id>/output                                 [login required]
   GET  /api/msd/tasks/<task_id>/download                               [login required]
   POST /api/msd/tasks/<task_id>/cancel                                 [login required]
@@ -30,6 +29,7 @@ The API host/port/session secret come from the [api] section of vae's config.ini
 from __future__ import annotations
 
 import functools
+import json
 import logging
 from pathlib import Path
 import time
@@ -41,6 +41,7 @@ from msd.ports.config_management_repository import ConfigManagementAccessError
 
 from vae.composition import Components, load_components
 from vae.config import get_config
+from vae.task_runner import TaskStatus
 
 logger = logging.getLogger(__name__)
 
@@ -48,12 +49,26 @@ _SELECTION = ("project_id", "platform_id", "version_id")
 _CREDENTIALS = ("username", "password")
 _CONNECT_FIELDS = ("connection_address", "username", "password")
 
-# Output-stream (SSE) pacing: how often a still-running task's store is
-# re-checked, and the hard cap on one stream (leak guard — a well-behaved
-# EventSource closes on the `done` event or when the card is reset).
+# Run stream (SSE) pacing: how often a still-running task's output store and
+# task status are re-checked, and the hard cap on one stream (leak guard — a
+# well-behaved EventSource closes on the `done` event or when the card is
+# reset). The stream carries the task's output lines, a `status` event on
+# every state change (plus a snapshot on connect/reconnect), and a final
+# `done` event carrying the terminal payload.
 _OUTPUT_STREAM_TICK_SECONDS = 0.5
 _OUTPUT_STREAM_MAX_SECONDS = 3600
 _OUTPUT_TERMINAL_STATES = ("SUCCESS", "FAILURE", "REVOKED")
+
+
+def _status_payload(status: TaskStatus) -> dict:
+    """JSON payload for a task status — shared by the REST cancel endpoint
+    and the run stream's `status`/`done` events."""
+    payload = {"task_id": status.task_id, "state": status.state}
+    if status.result is not None:
+        payload["result"] = status.result
+    if status.error is not None:
+        payload["error"] = status.error
+    return payload
 
 
 def login_required(view):
@@ -244,18 +259,7 @@ def create_app(components: Components = None) -> Flask:
         except Exception as exc:
             logger.warning("msd/run: task submission failed: %s", exc)
             return jsonify({"error": str(exc)}), 502
-        return jsonify({"task_id": task_id, "status_url": f"/api/msd/tasks/{task_id}"}), 202
-
-    @app.route("/api/msd/tasks/<task_id>")
-    @login_required
-    def api_msd_task_status(task_id):
-        status = components.msd_task_runner.status(task_id)
-        payload = {"task_id": status.task_id, "state": status.state}
-        if status.result is not None:
-            payload["result"] = status.result
-        if status.error is not None:
-            payload["error"] = status.error
-        return jsonify(payload)
+        return jsonify({"task_id": task_id}), 202
 
     @app.route("/api/msd/tasks/<task_id>/cancel", methods=["POST"])
     @login_required
@@ -265,12 +269,7 @@ def create_app(components: Components = None) -> Flask:
         except Exception as exc:
             logger.warning("msd/tasks/%s: cancellation failed: %s", task_id, exc)
             return jsonify({"error": str(exc)}), 502
-        payload = {"task_id": status.task_id, "state": status.state}
-        if status.result is not None:
-            payload["result"] = status.result
-        if status.error is not None:
-            payload["error"] = status.error
-        return jsonify(payload)
+        return jsonify(_status_payload(status))
 
     @app.route("/api/msd/tasks/<task_id>/download")
     @login_required
@@ -302,10 +301,11 @@ def create_app(components: Components = None) -> Flask:
         def stream():
             nonlocal cursor
             deadline = time.monotonic() + _OUTPUT_STREAM_MAX_SECONDS
+            last_state = None
             while time.monotonic() < deadline:
                 try:
                     lines = components.task_output_store.lines(task_id)
-                    state = components.msd_task_runner.status(task_id).state
+                    status = components.msd_task_runner.status(task_id)
                 except Exception:
                     # A store/status blip skips this tick; the stream stays up.
                     time.sleep(_OUTPUT_STREAM_TICK_SECONDS)
@@ -313,8 +313,13 @@ def create_app(components: Components = None) -> Flask:
                 for index, line in enumerate(lines[cursor:], start=cursor):
                     yield f"id: {index}\ndata: {line}\n\n"
                     cursor = index + 1
-                if state in _OUTPUT_TERMINAL_STATES:
-                    yield f"event: done\ndata: {state}\n\n"
+                # No `id:` on status/done events — state isn't resumable, a
+                # reconnect gets a fresh snapshot (last_state starts None).
+                if status.state != last_state:
+                    last_state = status.state
+                    yield f"event: status\ndata: {json.dumps(_status_payload(status))}\n\n"
+                if status.state in _OUTPUT_TERMINAL_STATES:
+                    yield f"event: done\ndata: {json.dumps(_status_payload(status))}\n\n"
                     return
                 time.sleep(_OUTPUT_STREAM_TICK_SECONDS)
 

@@ -150,7 +150,7 @@ def test_units_endpoint_requires_login_and_config_db():
     assert resp.get_json() == {"error": "config management database connection required"}
 
 
-def test_run_and_status_round_trip():
+def test_run_returns_task_id():
     client = _client()
     _login(client)
     _connect_data_sources(client)
@@ -158,24 +158,7 @@ def test_run_and_status_round_trip():
     resp = client.post("/api/msd/run", json=SELECTION)
     assert resp.status_code == 202
     body = resp.get_json()
-    task_id = body["task_id"]
-    assert task_id
-    assert body["status_url"] == f"/api/msd/tasks/{task_id}"
-
-    status = client.get(f"/api/msd/tasks/{task_id}").get_json()
-    assert status["state"] == "SUCCESS"
-    assert status["result"]["selection"] == SELECTION
-
-
-def test_unknown_task_id_reports_pending():
-    client = _client()
-    _login(client)
-    _connect_data_sources(client)
-
-    resp = client.get("/api/msd/tasks/does-not-exist")
-
-    assert resp.status_code == 200
-    assert resp.get_json() == {"task_id": "does-not-exist", "state": "PENDING"}
+    assert body["task_id"]
 
 
 def test_cancel_queued_task_reports_revoked():
@@ -247,8 +230,35 @@ def test_output_stream_serves_lines_and_done():
     body = resp.get_data(as_text=True)
     assert "data: clone: nav_app 1.0.0 cloned to /ws" in body
     assert "data: generate: wrote model setup data to /ws/model_setup_data.json" in body
-    assert "event: done" in body
-    assert "data: SUCCESS" in body
+    assert "event: status" in body
+    done = body.index("event: done")
+    assert '"state": "SUCCESS"' in body[done:]
+    assert '"selection"' in body[done:]  # terminal payload carries the result
+
+
+def test_output_stream_emits_status_on_state_changes():
+    components = Components(
+        defaults=_DEFAULTS,
+        config_repo_factory=lambda ds: FakeConfigManagementRepository(),
+        msd_task_runner=FakeTaskRunner(
+            run=lambda **ids: {"selection": {k: ids[k] for k in SELECTION}},
+            state_sequence=["PENDING", "STARTED"],
+        ),
+        auth_repo=InMemoryLdapAuthRepository(),
+    )
+    client = _client(components)
+    _login(client)
+    task_id = _completed_task_id(components, client)
+
+    resp = client.get(f"/api/msd/tasks/{task_id}/output")
+
+    body = resp.get_data(as_text=True)
+    pending = body.index('"state": "PENDING"')
+    started = body.index('"state": "STARTED"')
+    done = body.index("event: done")
+    assert pending < started < done
+    assert '"state": "SUCCESS"' in body[done:]
+    assert '"selection"' in body[done:]  # terminal payload carries the result
 
 
 def test_output_stream_resumes_from_last_event_id():
@@ -265,6 +275,7 @@ def test_output_stream_resumes_from_last_event_id():
     assert "line one" not in body
     assert "data: line two" in body
     assert "data: line three" in body
+    assert "event: status" in body  # state re-sent as a snapshot on reconnect
     assert "event: done" in body
 
 
