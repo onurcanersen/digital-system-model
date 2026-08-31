@@ -8,11 +8,9 @@
   <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon-32x32.png') }}">
   <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='favicon-16x16.png') }}">
   <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;600;700&display=swap" rel="stylesheet">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="{{ url_for('static', filename='vendor/orbitron/orbitron.css') }}" rel="stylesheet">
+  <link href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}" rel="stylesheet">
+  <link href="{{ url_for('static', filename='vendor/bootstrap-icons/bootstrap-icons.min.css') }}" rel="stylesheet">
   <style>
     :root {
       --cyan: #35e7ff;
@@ -216,6 +214,18 @@
     .cancel-btn:hover { box-shadow: 0 0 24px -6px rgba(255,71,87,.8); filter: brightness(1.1); color: #ff9cab; }
     .cancel-btn:active { transform: translateY(1px) scale(.99); }
     .cancel-btn:disabled { opacity: .5; }
+    .download-btn {
+      background: transparent;
+      border: 1px solid rgba(53,231,255,.5);
+      color: #6fe8ff;
+      box-shadow: 0 0 16px -8px rgba(53,231,255,.6);
+      transition: box-shadow .25s ease, transform .15s ease, filter .2s ease;
+      line-height: 1.2;
+      text-decoration: none;
+      text-align: center;
+    }
+    .download-btn:hover { box-shadow: 0 0 24px -6px rgba(53,231,255,.8); filter: brightness(1.1); color: #9df1ff; }
+    .download-btn:active { transform: translateY(1px) scale(.99); }
 
     .card-topbar {
       top: 1rem;
@@ -400,14 +410,11 @@
   <main class="hero">
     <img class="layer__img" src="{{ url_for('static', filename='bg.jpeg') }}"
          alt="" fetchpriority="high">
-    <img class="layer__img" src="{{ url_for('static', filename='ship.png') }}"
-         alt="" fetchpriority="high">
 
     {% macro card(id, title, subtitle, tag='div', hidden=False, attrs='', show_logout=False, show_back=False, icon=None) %}
     <{{ tag }} id="{{ id }}" class="login-card{% if hidden %} d-none{% endif %} pe-auto position-relative w-100 rounded-4 px-3 px-sm-4 pb-4 pb-sm-5"{% if attrs %} {{ attrs|safe }}{% endif %}>
       <div class="login-card__blur" aria-hidden="true">
         <img class="login-card__blur-img" src="{{ url_for('static', filename='bg.jpeg') }}" alt="">
-        <img class="login-card__blur-img" src="{{ url_for('static', filename='ship.png') }}" alt="">
       </div>
       <div class="login-card__tint" aria-hidden="true"></div>
 
@@ -436,7 +443,7 @@
           {% if icon %}
           <i class="bi bi-{{ icon }} login-icon login-icon--bi mb-3" aria-hidden="true"></i>
           {% else %}
-          <img src="{{ url_for('static', filename='app-icon.png') }}" alt="VAE"
+          <img src="{{ url_for('static', filename='logo.png') }}" alt=""
                class="login-icon object-fit-contain mb-3">
           {% endif %}
           <p class="login-title text-white fw-bold text-uppercase mt-1 mb-2">{{ title }}</p>
@@ -497,11 +504,11 @@
         </div>
 
         <button type="submit" id="configDbSubmitBtn" class="login-btn btn w-100 rounded-3 py-2 fw-semibold">
-          <span class="d-block text-uppercase fs-6 mb-1">Next</span>
+          <span class="d-block text-uppercase fs-6 mb-1">Connect</span>
         </button>
       {% endcall %}
 
-      {% call card('selectionCard', 'Select Project', 'Choose Platform & Version', tag='form', hidden=True, show_logout=True, show_back=True, icon='diagram-3') %}
+      {% call card('selectionCard', 'Select Project', 'Pick platform and version', tag='form', hidden=True, show_logout=True, show_back=True, icon='diagram-3') %}
         <div class="mb-2">
           <select name="projectId" required aria-label="Project" class="login-select form-select w-100 rounded-3"></select>
         </div>
@@ -578,6 +585,9 @@
             <button type="button" id="runCancelBtn" class="cancel-btn btn rounded-3 py-2 fw-semibold d-none">
               <span class="d-block text-uppercase fs-6">Cancel</span>
             </button>
+            <a href="#" id="runDownloadBtn" class="download-btn btn rounded-3 py-2 fw-semibold d-none">
+              <span class="d-block text-uppercase fs-6">Download</span>
+            </a>
             <button type="button" id="runSubmitBtn" class="login-btn btn w-100 rounded-3 py-2 fw-semibold">
               <span class="d-block text-uppercase fs-6 mb-1">Run</span>
             </button>
@@ -610,6 +620,7 @@
       const runResult = document.getElementById('runResult');
       const runSubmitBtn = document.getElementById('runSubmitBtn');
       const runCancelBtn = document.getElementById('runCancelBtn');
+      const runDownloadBtn = document.getElementById('runDownloadBtn');
       const runOutput = document.getElementById('runOutput');
       const runUnits = document.getElementById('runUnits');
       const runUnitsCount = document.getElementById('runUnitsCount');
@@ -896,6 +907,7 @@
         runOutputLineCount = 0;
         runOutput.classList.add('d-none');
         runCancelBtn.classList.add('d-none');
+        showRunDownload(null);
         runUnitsToken++; // invalidate any in-flight units load
         runUnitData = [];
         unitRows = new Map();
@@ -919,11 +931,11 @@
 
       function renderRunResult(result) {
         applyRunResultToUnits(result);
-        const parts = [`<p class="mb-1">Output: ${result.output_path || ''}</p>`];
+        const parts = [];
         const scaleText = Object.entries(result.scale || {})
           .map(([key, value]) => `${value} ${key}`)
           .join(' · ');
-        if (scaleText) parts.push(`<p class="mb-1">${scaleText}</p>`);
+        if (scaleText) parts.push(`<p class="mb-1 text-center">${scaleText}</p>`);
         const errors = result.validation_errors || [];
         if (errors.length) {
           const shown = errors.slice(0, 3).map((e) => e.reason).join('<br>');
@@ -973,17 +985,29 @@
         runSubmitBtn.disabled = false;
       }
 
+      function showRunDownload(taskId) {
+        if (taskId) {
+          runDownloadBtn.href = `/api/msd/tasks/${encodeURIComponent(taskId)}/download`;
+          runDownloadBtn.classList.remove('d-none');
+        } else {
+          runDownloadBtn.classList.add('d-none');
+        }
+      }
+
       function finishRun(state, body) {
         stopRunPolling();
         if (state === 'SUCCESS') {
           runStatus.textContent = 'Completed';
           renderRunResult(body.result || {});
+          showRunDownload(currentTaskId);
         } else if (state === 'FAILURE') {
           runStatus.textContent = body.error || 'Run failed';
+          showRunDownload(null);
         } else {
           // REVOKED, or the backend not yet reflecting the worker's
           // revocation mark right after a successful cancel
           runStatus.textContent = 'Cancelled';
+          showRunDownload(null);
         }
       }
 
@@ -1009,7 +1033,10 @@
 
       runSubmitBtn.addEventListener('click', async () => {
         runSubmitBtn.disabled = true;
+        runOutput.innerHTML = '';
+        runOutputLineCount = 0;
         runResult.classList.add('d-none');
+        showRunDownload(null);
         loadRunUnits(); // re-run: back to the fresh pre-run preview, no stale badges
         runStatus.textContent = 'Submitting…';
         try {

@@ -275,6 +275,64 @@ def test_output_stream_requires_login():
     assert resp.get_json() == {"error": "authentication required"}
 
 
+def test_download_serves_the_generated_json(tmp_path):
+    out = tmp_path / "model_setup_data.json"
+    out.write_text('{"apps": 2}')
+    components = Components(
+        defaults=_DEFAULTS,
+        config_repo_factory=lambda ds: FakeConfigManagementRepository(),
+        msd_task_runner=FakeTaskRunner(run=lambda **ids: {"output_path": str(out)}),
+        auth_repo=InMemoryLdapAuthRepository(),
+    )
+    client = _client(components)
+    _login(client)
+    _connect_data_sources(client)
+    task_id = client.post("/api/msd/run", json=SELECTION).get_json()["task_id"]
+
+    resp = client.get(f"/api/msd/tasks/{task_id}/download")
+
+    assert resp.status_code == 200
+    assert resp.content_type == "application/json"
+    assert "attachment" in resp.headers["Content-Disposition"]
+    assert "model_setup_data.json" in resp.headers["Content-Disposition"]
+    assert resp.get_json() == {"apps": 2}
+
+
+def test_download_requires_login():
+    resp = _client().get("/api/msd/tasks/does-not-exist/download")
+
+    assert resp.status_code == 401
+    assert resp.get_json() == {"error": "authentication required"}
+
+
+def test_download_without_run_output_reports_404():
+    client = _client()
+    _login(client)
+
+    resp = client.get("/api/msd/tasks/does-not-exist/download")
+
+    assert resp.status_code == 404
+    assert resp.get_json() == {"error": "run has no output file"}
+
+
+def test_download_missing_file_reports_404(tmp_path):
+    components = Components(
+        defaults=_DEFAULTS,
+        config_repo_factory=lambda ds: FakeConfigManagementRepository(),
+        msd_task_runner=FakeTaskRunner(run=lambda **ids: {"output_path": str(tmp_path / "gone.json")}),
+        auth_repo=InMemoryLdapAuthRepository(),
+    )
+    client = _client(components)
+    _login(client)
+    _connect_data_sources(client)
+    task_id = client.post("/api/msd/run", json=SELECTION).get_json()["task_id"]
+
+    resp = client.get(f"/api/msd/tasks/{task_id}/download")
+
+    assert resp.status_code == 404
+    assert resp.get_json() == {"error": "output file not found"}
+
+
 def test_selection_body_validation():
     client = _client()
     _login(client)

@@ -20,6 +20,7 @@ Flask endpoints:
   POST /api/msd/run   body {"project_id", "platform_id", "version_id"}  [login + both data sources connected]
   GET  /api/msd/tasks/<task_id>                                        [login required]
   GET  /api/msd/tasks/<task_id>/output                                 [login required]
+  GET  /api/msd/tasks/<task_id>/download                               [login required]
   POST /api/msd/tasks/<task_id>/cancel                                 [login required]
 
 Run with:  vae-api  (or: python -m vae.api)
@@ -30,9 +31,10 @@ from __future__ import annotations
 
 import functools
 import logging
+from pathlib import Path
 import time
 
-from flask import Flask, Response, jsonify, render_template, request, session
+from flask import Flask, Response, jsonify, render_template, request, send_file, session
 
 from msd.domain.data_source import SourceType
 from msd.ports.config_management_repository import ConfigManagementAccessError
@@ -269,6 +271,22 @@ def create_app(components: Components = None) -> Flask:
         if status.error is not None:
             payload["error"] = status.error
         return jsonify(payload)
+
+    @app.route("/api/msd/tasks/<task_id>/download")
+    @login_required
+    def api_msd_task_download(task_id):
+        output_path = (components.msd_task_runner.status(task_id).result or {}).get("output_path")
+        if not output_path:
+            return jsonify({"error": "run has no output file"}), 404
+        path = Path(output_path)
+        if not path.is_file():
+            return jsonify({"error": "output file not found"}), 404
+        return send_file(
+            path,
+            mimetype="application/json",
+            as_attachment=True,
+            download_name=path.name,
+        )
 
     @app.route("/api/msd/tasks/<task_id>/output")
     @login_required
