@@ -69,8 +69,8 @@ def test_index_serves_the_ui():
     resp = _client().get("/")
 
     assert resp.status_code == 200
-    assert "Design Verification" in resp.text
-    assert "Sign in" in resp.text
+    assert "Digital System Model" in resp.text
+    assert "Login" in resp.text
 
 
 def test_login_response_includes_data_source_defaults():
@@ -110,6 +110,44 @@ def test_selection_endpoints_only_require_config_mgmt_db_not_source_repo():
     resp = client.get("/api/projects")
 
     assert resp.status_code == 200
+
+
+def test_units_endpoint_returns_selection_units():
+    client = _client()
+    _login(client)
+    _connect_data_sources(client)
+
+    resp = client.get("/api/projects/proj-1/platforms/plat-1/versions/1.0.0/units")
+
+    assert resp.status_code == 200
+    assert resp.get_json()["units"] == [
+        {"unit_name": "unit-alpha", "version": "1.0.0", "is_candidate": False},
+        {"unit_name": "unit-beta", "version": "2.1.0", "is_candidate": False},
+    ]
+
+
+def test_units_endpoint_only_requires_config_mgmt_db_not_source_repo():
+    client = _client()
+    _login(client)
+    resp = _connect_config_mgmt_db(client)
+    assert resp.status_code == 200
+
+    resp = client.get("/api/projects/proj-1/platforms/plat-1/versions/1.0.0/units")
+
+    assert resp.status_code == 200
+
+
+def test_units_endpoint_requires_login_and_config_db():
+    client = _client()
+
+    resp = client.get("/api/projects/proj-1/platforms/plat-1/versions/1.0.0/units")
+    assert resp.status_code == 401
+    assert resp.get_json() == {"error": "authentication required"}
+
+    _login(client)
+    resp = client.get("/api/projects/proj-1/platforms/plat-1/versions/1.0.0/units")
+    assert resp.status_code == 401
+    assert resp.get_json() == {"error": "config management database connection required"}
 
 
 def test_run_and_status_round_trip():
@@ -230,6 +268,27 @@ def test_connect_config_mgmt_db_failure_maps_to_502():
 
     assert resp.status_code == 502
     assert "bad creds" in resp.get_json()["error"]
+
+
+def test_units_access_error_maps_to_502():
+    class _BrokenUnitsRepo(FakeConfigManagementRepository):
+        def list_unit_versions(self, project_id, platform_id, version_id):
+            raise ConfigManagementAccessError("config db down")
+
+    components = Components(
+        defaults=_DEFAULTS,
+        config_repo_factory=lambda ds: _BrokenUnitsRepo(),
+        msd_task_runner=FakeTaskRunner(run=lambda **ids: None),
+        auth_repo=InMemoryLdapAuthRepository(),
+    )
+    client = _client(components)
+    _login(client)
+    _connect_data_sources(client)
+
+    resp = client.get("/api/projects/proj-1/platforms/plat-1/versions/1.0.0/units")
+
+    assert resp.status_code == 502
+    assert "config db down" in resp.get_json()["error"]
 
 
 def test_login_rejects_bad_credentials():

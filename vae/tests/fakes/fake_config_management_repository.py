@@ -1,6 +1,4 @@
-"""In-memory fake of msd's IConfigManagementRepository for vae's API tests.
-Only list_projects/list_platforms/list_versions are exercised by vae.api;
-the other two abstract methods are trivial stubs so the ABC is instantiable."""
+"""In-memory fake of msd's IConfigManagementRepository for vae's API tests."""
 
 from __future__ import annotations
 
@@ -18,12 +16,17 @@ class FakeConfigManagementRepository(IConfigManagementRepository):
         projects: Optional[List[ProjectRecord]] = None,
         platforms: Optional[List[PlatformRecord]] = None,
         versions: Optional[List[VersionRecord]] = None,
+        units: Optional[List[SoftwareUnitVersion]] = None,
         raise_error: Optional[Exception] = None,
     ):
         self._projects = projects if projects is not None else [ProjectRecord("proj-1", "skywatch")]
         self._platforms = platforms if platforms is not None else [PlatformRecord("plat-1", "proj-1", "nftw")]
         self._versions = versions if versions is not None else [
             VersionRecord("1.0.0", "proj-1", "plat-1", "1.0.0", is_effective=True)
+        ]
+        self._units = units if units is not None else [
+            SoftwareUnitVersion("unit-alpha", "1.0.0"),
+            SoftwareUnitVersion("unit-beta", "2.1.0"),
         ]
         self._raise_error = raise_error
 
@@ -44,7 +47,8 @@ class FakeConfigManagementRepository(IConfigManagementRepository):
         return [v for v in self._versions if v.project_id == project_id and v.platform_id == platform_id]
 
     def list_unit_versions(self, project_id: str, platform_id: str, version_id: str) -> List[SoftwareUnitVersion]:
-        raise NotImplementedError("not used by vae's API in this slice")
+        self._maybe_raise()
+        return self._units
 
     def get_system_hierarchy(self, unit_name: str) -> Optional[SystemHierarchyRecord]:
         raise NotImplementedError("not used by vae's API in this slice")

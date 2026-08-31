@@ -16,6 +16,7 @@ Flask endpoints:
   GET  /api/projects                                                    [login + config_mgmt_db connected]
   GET  /api/projects/<project_id>/platforms                             [login + config_mgmt_db connected]
   GET  /api/projects/<project_id>/platforms/<platform_id>/versions      [login + config_mgmt_db connected]
+  GET  /api/projects/<project_id>/platforms/<platform_id>/versions/<version_id>/units  [login + config_mgmt_db connected]
   POST /api/msd/run   body {"project_id", "platform_id", "version_id"}  [login + both data sources connected]
   GET  /api/msd/tasks/<task_id>                                        [login required]
 
@@ -194,6 +195,17 @@ def create_app(components: Components = None) -> Flask:
         except ConfigManagementAccessError as exc:
             return jsonify({"error": str(exc)}), 502
         return jsonify({"versions": [v.to_dict() for v in versions]})
+
+    @app.route("/api/projects/<project_id>/platforms/<platform_id>/versions/<version_id>/units")
+    @login_required
+    @config_db_required
+    def api_units(project_id, platform_id, version_id):
+        config_repo = components.config_repo_factory(_connections()[SourceType.CONFIG_MGMT_DB])
+        try:
+            units = config_repo.list_unit_versions(project_id, platform_id, version_id)
+        except ConfigManagementAccessError as exc:
+            return jsonify({"error": str(exc)}), 502
+        return jsonify({"units": [u.to_dict() for u in units]})
 
     @app.route("/api/msd/run", methods=["POST"])
     @login_required
