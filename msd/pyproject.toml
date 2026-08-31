@@ -6,9 +6,11 @@ build-backend = "setuptools.build_meta"
 name = "msd"
 version = "0.1.0"
 description = "DSM-MSD: Model Setup Data Generation (library — no API/worker of its own; see vae)"
-requires-python = ">=3.9"
+requires-python = ">=3.8"
 dependencies = [
     "PyMySQL==1.0.3",
+    "cryptography==46.0.0",
+    "pandas==2.0.1",
 ]
 
 [tool.setuptools]
