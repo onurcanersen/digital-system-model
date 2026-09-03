@@ -69,11 +69,12 @@ Then open the UI at <http://127.0.0.1:8080>.
 | POST | `/api/selection` | Persist the selected project/platform/version in the session; body `{"project_id", "platform_id", "version_id"}` |
 | DELETE | `/api/selection` | Clear the persisted selection (the UI clears it on resume when the options no longer exist) |
 | POST | `/api/msd/run` | Enqueue msd's clone + generate workflow; body `{"project_id", "platform_id", "version_id"}` plus an optional `"candidate": {"unit_name", "version"}`, returns `202 {"task_id"}` |
-| GET | `/api/msd/tasks/<task_id>/output` | Server-sent run stream (SSE): output lines, `status` events pushed on state changes (with a snapshot on connect/reconnect), and a final `done` event carrying the terminal payload (state/result/error) |
+| GET | `/api/msd/tasks/<task_id>/output` | Server-sent run stream (SSE): output lines, `status` events pushed on state changes (with a snapshot on connect/reconnect); a terminal `status` (state/result/error) ends the run — the client closes on it, and the stream stays open up to 60s afterwards as a leak guard for a client that vanished |
 | POST | `/api/msd/tasks/<task_id>/cancel` | Cancel a queued or running task (terminates the worker process if running); returns the task state |
 
-Note: each open run stream holds one API thread for the run's duration
-(dev server is threaded by default; size production workers accordingly).
+Note: each open run stream holds one API thread for the run's duration, plus
+up to 60s after completion until the client closes the stream (dev server is
+threaded by default; size production workers accordingly).
 
 Produced files are addressed by selection + run id (the run id being the task
 id of the run that produced them), never through the task runner: a task's

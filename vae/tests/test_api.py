@@ -372,7 +372,10 @@ def _completed_task_id(components: Components, client) -> str:
     return client.post("/api/msd/run", json=SELECTION).get_json()["task_id"]
 
 
-def test_output_stream_serves_lines_and_done():
+def test_output_stream_serves_lines_and_terminal_status(monkeypatch):
+    # Zero grace: with the default 60s the stream would stay open after the
+    # terminal state, and the test client consumes generators to exhaustion.
+    monkeypatch.setattr(vae_api, "_OUTPUT_STREAM_TERMINAL_GRACE_SECONDS", 0)
     components = _components()
     client = _client(components)
     _login(client)
@@ -387,13 +390,14 @@ def test_output_stream_serves_lines_and_done():
     body = resp.get_data(as_text=True)
     assert "data: clone: nav_app 1.0.0 cloned to /ws" in body
     assert "data: generate: wrote model setup data to /ws/model_setup_data.json" in body
-    assert "event: status" in body
-    done = body.index("event: done")
-    assert '"state": "SUCCESS"' in body[done:]
-    assert '"selection"' in body[done:]  # terminal payload carries the result
+    status = body.index("event: status")
+    assert status > body.index("data: generate")  # lines precede the state
+    assert '"state": "SUCCESS"' in body[status:]
+    assert '"selection"' in body[status:]  # terminal payload carries the result
 
 
-def test_output_stream_emits_status_on_state_changes():
+def test_output_stream_emits_status_on_state_changes(monkeypatch):
+    monkeypatch.setattr(vae_api, "_OUTPUT_STREAM_TERMINAL_GRACE_SECONDS", 0)
     components = Components(
         defaults=_DEFAULTS,
         config_repo_factory=lambda ds: FakeConfigManagementRepository(),
@@ -413,15 +417,16 @@ def test_output_stream_emits_status_on_state_changes():
     body = resp.get_data(as_text=True)
     pending = body.index('"state": "PENDING"')
     started = body.index('"state": "STARTED"')
-    done = body.index("event: done")
-    assert pending < started < done
-    assert '"state": "SUCCESS"' in body[done:]
-    assert '"selection"' in body[done:]  # terminal payload carries the result
+    success = body.rindex('"state": "SUCCESS"')
+    assert pending < started < success
+    assert '"selection"' in body[success:]  # terminal payload carries the result
 
 
-def test_output_stream_resumes_after_the_last_event_id():
+def test_output_stream_resumes_after_the_last_event_id(monkeypatch):
     """The id is of the last line the client *received*, so resuming replays
-    nothing it already has."""
+    nothing it already has. A client that reopens the stream itself (its own
+    re-dial after a drop) says where to resume in the query string."""
+    monkeypatch.setattr(vae_api, "_OUTPUT_STREAM_TERMINAL_GRACE_SECONDS", 0)
     components = _components()
     client = _client(components)
     _login(client)
@@ -429,33 +434,14 @@ def test_output_stream_resumes_after_the_last_event_id():
     for line in ("line one", "line two", "line three"):
         components.task_output_store.append(task_id, line)
 
-    resp = client.get(f"/api/msd/tasks/{task_id}/output", headers={"Last-Event-ID": "1"})
+    resp = client.get(f"/api/msd/tasks/{task_id}/output?last_event_id=1")
 
     body = resp.get_data(as_text=True)
     assert "line one" not in body
     assert "line two" not in body
     assert "data: line three" in body
     assert "event: status" in body  # state re-sent as a snapshot on reconnect
-    assert "event: done" in body
-
-
-def test_output_stream_resumes_from_a_query_parameter():
-    """A client that reopens the stream itself cannot set Last-Event-ID —
-    only the browser's own reconnect sends that header — so it says where to
-    resume in the query string instead."""
-    components = _components()
-    client = _client(components)
-    _login(client)
-    task_id = _completed_task_id(components, client)
-    for line in ("line one", "line two", "line three"):
-        components.task_output_store.append(task_id, line)
-
-    resp = client.get(f"/api/msd/tasks/{task_id}/output?last_event_id=0")
-
-    body = resp.get_data(as_text=True)
-    assert "line one" not in body
-    assert "data: line two" in body
-    assert "data: line three" in body
+    assert '"state": "SUCCESS"' in body
 
 
 def test_output_stream_pings_while_the_run_is_quiet(monkeypatch):
@@ -465,6 +451,7 @@ def test_output_stream_pings_while_the_run_is_quiet(monkeypatch):
     and a client that cannot tell the difference never reconnects."""
     monkeypatch.setattr(vae_api, "_OUTPUT_STREAM_TICK_SECONDS", 0)
     monkeypatch.setattr(vae_api, "_OUTPUT_STREAM_PING_SECONDS", 0)
+    monkeypatch.setattr(vae_api, "_OUTPUT_STREAM_TERMINAL_GRACE_SECONDS", 0)
     components = Components(
         defaults=_DEFAULTS,
         config_repo_factory=lambda ds: FakeConfigManagementRepository(),
@@ -482,7 +469,26 @@ def test_output_stream_pings_while_the_run_is_quiet(monkeypatch):
     body = client.get(f"/api/msd/tasks/{task_id}/output").get_data(as_text=True)
 
     assert "event: ping" in body
-    assert body.index("event: ping") < body.index("event: done")
+    assert body.index("event: ping") < body.index('"state": "SUCCESS"')
+
+
+def test_output_stream_stays_open_after_the_terminal_status(monkeypatch):
+    """The terminal status is the terminator the client closes on, but the
+    server does not close first: it keeps the stream open (pinging) until the
+    grace elapses, so the final events always ride a connection nobody is
+    tearing down."""
+    monkeypatch.setattr(vae_api, "_OUTPUT_STREAM_TICK_SECONDS", 0.05)
+    monkeypatch.setattr(vae_api, "_OUTPUT_STREAM_TERMINAL_GRACE_SECONDS", 0.3)
+    monkeypatch.setattr(vae_api, "_OUTPUT_STREAM_TERMINAL_PING_SECONDS", 0.1)
+    components = _components()
+    client = _client(components)
+    _login(client)
+    task_id = _completed_task_id(components, client)
+
+    body = client.get(f"/api/msd/tasks/{task_id}/output").get_data(as_text=True)
+
+    assert "event: ping" in body
+    assert body.index("event: ping") > body.index('"state": "SUCCESS"')
 
 
 def test_output_stream_requires_login():

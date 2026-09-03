@@ -342,13 +342,20 @@
 
   /* ------------------------------------------------------------ messages */
 
-  // kind: "error" | "ok". An empty text clears the strip entirely.
+  // kind: "ok" | "info" | anything else (error). An empty text clears the
+  // strip entirely. "info" is a calm, neutral notice (a reconnection in
+  // flight) — it must not read as an error.
   function setMessage(view, kind, text) {
     var node = $(view + "-message");
     if (!node) {
       return;
     }
-    node.className = kind === "ok" ? "message message--ok" : "message";
+    node.className =
+      kind === "ok"
+        ? "message message--ok"
+        : kind === "info"
+        ? "message message--info"
+        : "message";
     node.textContent = "";
     if (!text) {
       return;
@@ -357,6 +364,8 @@
     icon.className =
       kind === "ok"
         ? "lucide lucide-circle-check"
+        : kind === "info"
+        ? "lucide lucide-network"
         : "lucide lucide-triangle-alert";
     var body = document.createElement("span");
     // textContent, not innerHTML: server error strings are data, not markup.
@@ -1253,11 +1262,13 @@
 
   /* Model Setup Data production for the confirmed context (SRS DSM-VAE req
    * 6, 8): submit the run, then follow the worker's own log output and task
-   * state over one SSE stream until it ends. The stream carries the lines,
-   * a `status` event on every state change, a `ping` while the run is quiet,
-   * and a final `done` — so there is no polling, and reconnecting (with the
-   * last event id) resumes the lines it already delivered rather than
-   * replaying them. */
+   * state over one SSE stream until a terminal `status` arrives. The stream
+   * carries the lines, a `status` event on every state change (with a
+   * snapshot on every connect), a `ping` while the run is quiet, and the
+   * terminal `status` — so there is no polling, and re-dialing (with the
+   * last line id) resumes the lines it already delivered rather than
+   * replaying them. The client closes the stream on the terminal state; the
+   * server's own close after that is only a leak guard. */
   var runSource = null;
   var runState = null;
   /* A run goes quiet for minutes at a time, and a connection that carries
@@ -1273,6 +1284,14 @@
   var runStreamAt = 0;
   var runStreamWatch = null;
   var runStreamRetrying = false;
+  /* Re-dial bookkeeping: how many consecutive re-opens came up with no event
+   * at all (a dead API, an expired session), the pending re-dial, and the
+   * point at which re-dialing is stopped in favour of telling the operator. */
+  var STREAM_REDIAL_MS = 1000;
+  var STREAM_REDIAL_MAX_FAILS = 5;
+  var runStreamFails = 0;
+  var runStreamRetryTimer = null;
+  var runStreamGivenUp = false;
   /* Where a reopened stream resumes from. Kept in step with what the console
    * is actually showing — resetConsole() clears it, so a console starting
    * empty is refilled from the top. */
@@ -1529,6 +1548,16 @@
   }
 
   function openRunStream(taskId) {
+    // A user-initiated open must not race a pending re-dial, and a new run
+    // starts with a clean re-dial slate.
+    if (runStreamRetryTimer) {
+      window.clearTimeout(runStreamRetryTimer);
+      runStreamRetryTimer = null;
+    }
+    if (taskId !== runStreamTaskId) {
+      runStreamFails = 0;
+      runStreamGivenUp = false;
+    }
     closeRunStream();
     if (!window.EventSource) {
       setMessage(
@@ -1539,16 +1568,19 @@
       return;
     }
     runStreamTaskId = taskId;
-    /* Only the browser's *own* reconnect carries Last-Event-ID; a stream this
-     * code opens is a new one, and would replay the whole run into a console
-     * that already holds it. So where to resume from is said in the URL, and
-     * the id of the last line seen survives the reopen. */
+    /* A stream this code opens is a new one, and would replay the whole run
+     * into a console that already holds it — so where to resume from is said
+     * in the URL, and the id of the last line seen survives the reopen. */
     var url = taskUrl(taskId, "output");
     if (runStreamLastId !== null) {
       url += "?last_event_id=" + encodeURIComponent(runStreamLastId);
     }
     runSource = new EventSource(url);
-    markRunStream();
+    // Arm the watchdog against this opening, not the last one. Not
+    // markRunStream(): an event, not a dial, is what proves the stream alive —
+    // resetting the re-dial slate here would defeat the give-up count while
+    // the API is down.
+    runStreamAt = Date.now();
     runSource.onmessage = function (event) {
       markRunStream(event);
       appendConsole(event.data);
@@ -1556,36 +1588,60 @@
     // Nothing to draw: a ping only says the stream is still there, which is
     // the whole point of it.
     runSource.addEventListener("ping", markRunStream);
-    // Same handler for both: `done` is the terminal `status`, repeated so a
-    // client can stop without inspecting the state itself.
     runSource.addEventListener("status", handleRunStatus);
-    runSource.addEventListener("done", handleRunStatus);
-    /* EventSource retries on its own after an error it noticed, so this says
-     * what is happening rather than tearing the stream down — the watchdog
-     * is what handles the errors it never notices. */
+    /* Closing the source on the re-dial also suppresses EventSource's own
+     * retry: the app is the only thing re-dialing, and it counts its
+     * failures. */
     runSource.onerror = function () {
       if (RUN_TERMINAL[runState]) {
         closeRunStream();
         return;
       }
+      runStreamFails += 1;
+      if (runStreamFails >= STREAM_REDIAL_MAX_FAILS) {
+        runStreamGivenUp = true;
+        runStreamRetrying = false;
+        closeRunStream();
+        setMessage(
+          "run",
+          "error",
+          "Lost the connection to the run. Reload the page to continue."
+        );
+        return;
+      }
       runStreamRetrying = true;
-      setMessage("run", null, "Reconnecting to the run…");
+      setMessage("run", "info", "Reconnecting to the run…");
+      runStreamRetryTimer = window.setTimeout(function () {
+        runStreamRetryTimer = null;
+        openRunStream(runStreamTaskId);
+      }, STREAM_REDIAL_MS);
     };
+    /* The watchdog catches the drops the browser never notices (no FIN):
+     * silence for STREAM_STALE_MS is a dead stream whatever the socket
+     * believes. It shares the re-dial path, and stands down once re-dialing
+     * has been given up. */
     runStreamWatch = window.setInterval(function () {
-      if (!runStreamTaskId || Date.now() - runStreamAt < STREAM_STALE_MS) {
+      if (
+        runStreamGivenUp ||
+        !runStreamTaskId ||
+        Date.now() - runStreamAt < STREAM_STALE_MS
+      ) {
         return;
       }
       openRunStream(runStreamTaskId);
     }, STREAM_WATCH_MS);
   }
 
-  // Any event at all is proof the stream is alive, and takes down a
-  // reconnection notice the operator no longer needs to see.
+  // Any event at all is proof the stream is alive: it arms the watchdog,
+  // resets the re-dial slate, and takes down a reconnection notice the
+  // operator no longer needs to see.
   function markRunStream(event) {
     runStreamAt = Date.now();
     if (event && event.lastEventId) {
       runStreamLastId = event.lastEventId;
     }
+    runStreamFails = 0;
+    runStreamGivenUp = false;
     if (runStreamRetrying) {
       runStreamRetrying = false;
       setMessage("run", null, "");
@@ -1593,6 +1649,10 @@
   }
 
   function closeRunStream() {
+    if (runStreamRetryTimer) {
+      window.clearTimeout(runStreamRetryTimer);
+      runStreamRetryTimer = null;
+    }
     if (runStreamWatch) {
       window.clearInterval(runStreamWatch);
       runStreamWatch = null;
@@ -1611,11 +1671,10 @@
     } catch (error) {
       return;
     }
-    if (RUN_TERMINAL[runState] && status.state === runState) {
-      // `done` after the terminal `status`: same outcome, already drawn.
-      return;
-    }
     setRunState(status.state, status);
+    /* A terminal status is the terminator: closing here is what ends the
+     * stream. The server's grace close afterwards is only a leak guard for a
+     * client that vanished. */
     if (RUN_TERMINAL[status.state]) {
       closeRunStream();
     }

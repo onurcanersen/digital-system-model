@@ -578,6 +578,15 @@
         color: var(--cyan);
       }
 
+      /* A neutral, in-flight notice (e.g. a stream re-dial): deliberately
+         neither the danger base nor the ok cyan, so it reads as "happening",
+         not "wrong". */
+      .message--info {
+        border-color: var(--line);
+        background-color: rgba(223, 238, 242, 0.06);
+        color: var(--ink);
+      }
+
       @keyframes message-in {
         from {
           opacity: 0;

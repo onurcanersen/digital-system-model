@@ -63,12 +63,16 @@ _CONNECT_FIELDS = ("connection_address", "username", "password")
 _CANDIDATE_FIELDS = ("unit_name", "version")
 
 # Run stream (SSE) pacing: how often a still-running task's output store and
-# task status are re-checked, and the hard cap on one stream (leak guard — a
-# well-behaved EventSource closes on the `done` event or when the card is
-# reset). The stream carries the task's output lines, a `status` event on
-# every state change (plus a snapshot on connect/reconnect), a `ping` every
-# PING_SECONDS of silence, and a final `done` event carrying the terminal
-# payload.
+# task status are re-checked, the hard cap on one stream, and the grace window
+# after a run has ended. The stream carries the task's output lines, a `status`
+# event on every state change (plus a snapshot on connect/reconnect), and a
+# `ping` every PING_SECONDS of silence. The terminal `status` is the
+# terminator: the client closes the stream on it, and the server keeps the
+# connection open for TERMINAL_GRACE_SECONDS afterwards as a leak guard
+# (a client that vanished is detected on the next failed ping write) rather
+# than closing it itself — a server-side close in the same instant as the
+# final events lets proxies deliver the close before the bytes, which reads
+# to the client as a mid-run drop.
 #
 # A real run goes quiet for minutes at a time (source analysis logs once per
 # unit and nothing in between), and an SSE connection that carries no bytes
@@ -81,12 +85,14 @@ _CANDIDATE_FIELDS = ("unit_name", "version")
 _OUTPUT_STREAM_TICK_SECONDS = 0.5
 _OUTPUT_STREAM_PING_SECONDS = 15
 _OUTPUT_STREAM_MAX_SECONDS = 3600
+_OUTPUT_STREAM_TERMINAL_GRACE_SECONDS = 60
+_OUTPUT_STREAM_TERMINAL_PING_SECONDS = 5
 _OUTPUT_TERMINAL_STATES = ("SUCCESS", "FAILURE", "REVOKED")
 
 
 def _status_payload(status: TaskStatus) -> dict:
     """JSON payload for a task status — shared by the REST cancel endpoint
-    and the run stream's `status`/`done` events."""
+    and the run stream's `status` events (a terminal one ends the run)."""
     payload = {"task_id": status.task_id, "state": status.state}
     if status.result is not None:
         payload["result"] = status.result
@@ -447,13 +453,13 @@ def create_app(components: Components = None) -> Flask:
     @app.route("/api/msd/tasks/<task_id>/output")
     @login_required
     def api_msd_task_output(task_id):
-        # EventSource reconnects after a dropped stream carrying the last
-        # event id it processed, so the stream resumes at the line *after*
-        # that one instead of replaying what the client already has. Only the
-        # browser's own reconnect sends that header, though — a client that
-        # reopens the stream itself (its watchdog having caught a drop the
-        # browser never noticed) says where to resume in the query string.
-        resume = request.headers.get("Last-Event-ID") or request.args.get("last_event_id")
+        # A client that reopens the stream itself (its own re-dial after a
+        # drop) says where to resume in the query string — only the browser's
+        # native reconnect would set Last-Event-ID, and the client closes the
+        # source on error so it no longer happens. Resuming at the line after
+        # the id the client last received means nothing it already has is
+        # replayed.
+        resume = request.args.get("last_event_id")
         try:
             # Clamped: a negative id would slice from the end of the log and
             # replay the tail as if it were the head.
@@ -467,29 +473,44 @@ def create_app(components: Components = None) -> Flask:
             deadline = now + _OUTPUT_STREAM_MAX_SECONDS
             last_written = now
             last_state = None
+            terminal_at = None
             while time.monotonic() < deadline:
                 try:
                     lines = components.task_output_store.lines(task_id)
-                    status = components.msd_task_runner.status(task_id)
+                    # The state is already known terminal in the grace phase,
+                    # so the task runner is only asked while the run is going.
+                    if terminal_at is None:
+                        status = components.msd_task_runner.status(task_id)
                 except Exception:
                     # A store/status blip skips this tick; the stream stays up.
                     time.sleep(_OUTPUT_STREAM_TICK_SECONDS)
                     continue
+                # No `id:` on status/ping events — none of them is resumable,
+                # and a reconnect gets a fresh snapshot of the state anyway
+                # (last_state starts None).
                 for index, line in enumerate(lines[cursor:], start=cursor):
                     yield f"id: {index}\ndata: {line}\n\n"
                     cursor = index + 1
                     last_written = time.monotonic()
-                # No `id:` on status/done/ping events — none of them is
-                # resumable, and a reconnect gets a fresh snapshot of the
-                # state anyway (last_state starts None).
-                if status.state != last_state:
+                if terminal_at is None and status.state != last_state:
                     last_state = status.state
                     yield f"event: status\ndata: {json.dumps(_status_payload(status))}\n\n"
                     last_written = time.monotonic()
-                if status.state in _OUTPUT_TERMINAL_STATES:
-                    yield f"event: done\ndata: {json.dumps(_status_payload(status))}\n\n"
-                    return
-                if time.monotonic() - last_written >= _OUTPUT_STREAM_PING_SECONDS:
+                    if status.state in _OUTPUT_TERMINAL_STATES:
+                        # The terminal status is the terminator: the client
+                        # closes on it. The server does not close here — it
+                        # keeps the stream open (lines only, faster pings)
+                        # until the client does or the grace elapses, so the
+                        # final events always ride a connection nobody is
+                        # tearing down.
+                        terminal_at = time.monotonic()
+                if terminal_at is not None:
+                    if time.monotonic() - last_written >= _OUTPUT_STREAM_TERMINAL_PING_SECONDS:
+                        yield "event: ping\ndata: {}\n\n"
+                        last_written = time.monotonic()
+                    if time.monotonic() - terminal_at >= _OUTPUT_STREAM_TERMINAL_GRACE_SECONDS:
+                        return
+                elif time.monotonic() - last_written >= _OUTPUT_STREAM_PING_SECONDS:
                     yield "event: ping\ndata: {}\n\n"
                     last_written = time.monotonic()
                 time.sleep(_OUTPUT_STREAM_TICK_SECONDS)
