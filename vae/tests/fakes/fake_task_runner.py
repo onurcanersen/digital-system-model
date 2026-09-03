@@ -5,7 +5,7 @@ outcome, mirroring msd's own FakeTaskRunner."""
 from __future__ import annotations
 
 import uuid
-from typing import Callable
+from typing import Callable, Optional
 
 from vae.task_runner import ITaskRunner, TaskStatus
 
@@ -31,6 +31,8 @@ class FakeTaskRunner(ITaskRunner):
         source_repo_address: str,
         source_repo_username: str,
         source_repo_password: str,
+        produced_by: str = None,
+        candidate: Optional[dict] = None,
     ) -> str:
         task_id = uuid.uuid4().hex
         try:
@@ -44,6 +46,8 @@ class FakeTaskRunner(ITaskRunner):
                 source_repo_address=source_repo_address,
                 source_repo_username=source_repo_username,
                 source_repo_password=source_repo_password,
+                produced_by=produced_by,
+                candidate=candidate,
             )
         except Exception as exc:
             self._tasks[task_id] = TaskStatus(task_id=task_id, state="FAILURE", error=str(exc) or repr(exc))

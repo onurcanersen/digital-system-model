@@ -29,12 +29,31 @@ def test_submit_run_delegates_to_celery_delay():
             "proj-1", "plat-1", "1.0.0",
             "localhost:3306/cmdb", "dsm", "dsm",
             "http://localhost:3001/dsm-src", "dsm", "dsm",
+            produced_by="operator",
         ) == "abc"
     task.delay.assert_called_once_with(
         "proj-1", "plat-1", "1.0.0",
         "localhost:3306/cmdb", "dsm", "dsm",
         "http://localhost:3001/dsm-src", "dsm", "dsm",
+        "operator", None,
     )
+
+
+def test_submit_run_forwards_the_candidate_under_evaluation():
+    """SRS DSM-MSD req 11: the candidate rides to the worker as a plain dict,
+    since task arguments cross the broker as JSON."""
+    runner = CeleryTaskRunner()
+    candidate = {"unit_name": "sensor_app", "version": "1.0.3"}
+    with mock.patch("vae.task_runner.run_msd_workflow") as task:
+        task.delay.return_value = _FakeAsyncResult(states.PENDING, task_id="abc")
+        runner.submit_run(
+            "proj-1", "plat-1", "1.0.0",
+            "localhost:3306/cmdb", "dsm", "dsm",
+            "http://localhost:3001/dsm-src", "dsm", "dsm",
+            produced_by="operator",
+            candidate=candidate,
+        )
+    assert task.delay.call_args.args[-1] == candidate
 
 
 def test_cancel_revokes_with_terminate_and_reports_status():

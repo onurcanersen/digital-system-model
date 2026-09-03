@@ -182,10 +182,13 @@ class JsonModelSetupDataWriter(IModelSetupDataWriter):
     """Adapter implementing IModelSetupDataWriter, plus the graph-building
     step GenerateModelSetupData calls before constructing ModelSetupData.
 
-    `write` persists the graph payload only (nodes/topics/applications/
-    libraries/relationships) — the surrounding context/inventory/
-    acquisition data stays on the in-memory ModelSetupData and on the
-    caller's response, not on disk."""
+    `write` persists the whole ModelSetupData (req 19): the graph under
+    "graph", and with it the context, inventory, per-file acquisition
+    records and validation errors. Those records are the run's traceability
+    — the file name/path/version/timestamp of req 14, the missing-data
+    status of req 15 and the error detail of req 18 — and the file is where
+    they are *recorded*; the caller's response carries them only until the
+    task result expires."""
 
     def __init__(self, selection_dir: Path):
         self._selection_dir = selection_dir
@@ -241,6 +244,13 @@ class JsonModelSetupDataWriter(IModelSetupDataWriter):
 
     def write(self, data: ModelSetupData, output_path: Path) -> Path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(json.dumps(data.graph, indent=2), encoding="utf-8")
-        logger.info("Model Setup Data graph written to %s", output_path)
+        output_path.write_text(json.dumps(data.to_dict(), indent=2), encoding="utf-8")
+        logger.info(
+            "Model Setup Data written to %s (%d unit(s), %d acquired file record(s), "
+            "%d validation error(s))",
+            output_path,
+            len(data.inventory.units),
+            len(data.acquired_files),
+            len(data.validation_errors),
+        )
         return output_path

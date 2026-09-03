@@ -10,11 +10,12 @@ merely if a file named Makefile exists.
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 
 from msd.adapters.source_code.mandatory_file_catalog import (
     MAKEFILE_RELATIVE_PATH,
@@ -34,6 +35,23 @@ from msd.ports.source_code_repository import (
 logger = logging.getLogger(__name__)
 
 CLONE_TIMEOUT_SECONDS = 300
+LS_REMOTE_TIMEOUT_SECONDS = 60
+
+_TAG_REF_PREFIX = "refs/tags/"
+
+
+def natural_version_key(version: str) -> Tuple[tuple, ...]:
+    """Sort key ordering version strings by their numeric parts, so 1.0.10
+    comes after 1.0.9 rather than before it as a plain string sort would.
+
+    Digit runs compare as numbers and everything else as text; the (0, …) /
+    (1, …) discriminator keeps a number from ever being compared against a
+    string, so no version string can raise here however it is shaped."""
+    return tuple(
+        (0, int(part), "") if part.isdigit() else (1, 0, part)
+        for part in re.split(r"(\d+)", version)
+        if part
+    )
 
 
 class GitSourceCodeRepository(ISourceCodeRepository):
@@ -64,22 +82,34 @@ class GitSourceCodeRepository(ISourceCodeRepository):
         scheme, _, rest = self._base_url.partition("://")
         return f"{scheme}://{self._user}:{self._password}@{rest}/{self._org}/{unit_name}.git"
 
-    def clone_unit(self, unit: SoftwareUnitVersion, dest_dir: Path) -> List[AcquiredFile]:
-        clone_path = dest_dir / unit.unit_name
-        cmd = ["git", "-c", "http.sslVerify=false", "clone", "--depth", "1", "--branch", unit.version, self._clone_url(unit.unit_name), str(clone_path)]
-
+    def _run_git(self, cmd: List[str], failure_message: str, timeout: int) -> subprocess.CompletedProcess:
+        """Run a git command against the remote, mapping every way it can fail
+        onto the port's error types (req 16). `failure_message` describes the
+        attempt ("clone 'nav_app' at '1.0.0'"), and is suffixed with git's own
+        stderr on a non-zero exit."""
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=CLONE_TIMEOUT_SECONDS)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         except subprocess.TimeoutExpired as exc:
-            raise SourceRepoAccessError(f"Clone of '{unit.unit_name}' timed out: {exc}") from exc
+            raise SourceRepoAccessError(f"Could not {failure_message}: timed out: {exc}") from exc
         except OSError as exc:
-            raise SourceRepoAccessError(f"Clone of '{unit.unit_name}' failed: {exc}") from exc
+            raise SourceRepoAccessError(f"Could not {failure_message}: {exc}") from exc
 
         if result.returncode != 0:
             stderr = result.stderr.strip()
             if "Authentication" in stderr or "401" in stderr or "403" in stderr:
-                raise SourceRepoAuthError(f"Authentication failed cloning '{unit.unit_name}': {stderr}")
-            raise SourceRepoAccessError(f"Could not clone '{unit.unit_name}' at '{unit.version}': {stderr}")
+                raise SourceRepoAuthError(f"Authentication failed, could not {failure_message}: {stderr}")
+            raise SourceRepoAccessError(f"Could not {failure_message}: {stderr}")
+        return result
+
+    def clone_unit(self, unit: SoftwareUnitVersion, dest_dir: Path) -> List[AcquiredFile]:
+        clone_path = dest_dir / unit.unit_name
+        cmd = ["git", "-c", "http.sslVerify=false", "clone", "--depth", "1", "--branch", unit.version, self._clone_url(unit.unit_name), str(clone_path)]
+
+        self._run_git(
+            cmd,
+            f"clone '{unit.unit_name}' at '{unit.version}'",
+            CLONE_TIMEOUT_SECONDS,
+        )
 
         git_dir = clone_path / ".git"
         if git_dir.exists():
@@ -120,3 +150,26 @@ class GitSourceCodeRepository(ISourceCodeRepository):
 
     def list_mandatory_files(self, unit_name: str) -> List[str]:
         return get_mandatory_files(unit_name)
+
+    def list_available_versions(self, unit_name: str) -> List[str]:
+        """The unit repository's tags, newest first (req 11).
+
+        A version is a tag here because that is how a unit's versions are
+        published (see dev/gitea/seed.sh), and it is the same ref `clone_unit`
+        asks for — so every version this returns is one a run can actually
+        acquire."""
+        result = self._run_git(
+            ["git", "-c", "http.sslVerify=false", "ls-remote", "--tags", "--refs", self._clone_url(unit_name)],
+            f"list the versions of '{unit_name}'",
+            LS_REMOTE_TIMEOUT_SECONDS,
+        )
+
+        versions = []
+        for line in result.stdout.splitlines():
+            _, _, ref = line.partition("\t")
+            ref = ref.strip()
+            if ref.startswith(_TAG_REF_PREFIX):
+                versions.append(ref[len(_TAG_REF_PREFIX):])
+        versions.sort(key=natural_version_key, reverse=True)
+        logger.info("versions: %s has %d published version(s)", unit_name, len(versions))
+        return versions

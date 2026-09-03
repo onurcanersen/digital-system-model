@@ -7,10 +7,14 @@ factories.
 
 msd is a library with no API or worker of its own — vae's Flask API and
 Celery worker (see the vae package) are the callers that build the
-config-mgmt/source-repo adapters from user-supplied credentials, build a
-per-run workspace dir keyed by a task id, and invoke RunWorkflow, so
+config-mgmt/source-repo adapters from user-supplied credentials, pass a run
+id keying that run's private directory, and invoke RunWorkflow, so
 concurrent runs never collide and runs never reuse previous artifacts
 (see services/run_workflow.py for the orchestration itself).
+
+`Components.catalog()` is the read side of the same workspace — what earlier
+runs produced — and needs no credentials, so `workspace_root()` is exported
+for callers that want only that.
 """
 
 from __future__ import annotations
@@ -20,11 +24,13 @@ from pathlib import Path
 from typing import Optional
 
 from msd.adapters.analysis.manual_source_analyzer import ManualSourceAnalyzer
+from msd.adapters.filesystem_model_setup_data_catalog import FilesystemModelSetupDataCatalog
 from msd.adapters.json_model_setup_data_writer import JsonModelSetupDataWriter
 from msd.adapters.source_code.make_build_runner import MakeBuildRunner
 from msd.config import Config, get_config
 from msd.domain.validation import MandatoryFieldRule
 from msd.ports.config_management_repository import IConfigManagementRepository
+from msd.ports.model_setup_data_catalog import IModelSetupDataCatalog
 from msd.ports.source_code_repository import ISourceCodeRepository
 from msd.services.acquire_project_context import AcquireProjectContext
 from msd.services.analyze_software_units import AnalyzeSoftwareUnits
@@ -74,10 +80,21 @@ class Components:
     def workflow(self) -> RunWorkflow:
         return RunWorkflow(clone=self.clone(), generate_factory=self.generate)
 
+    def catalog(self) -> IModelSetupDataCatalog:
+        return FilesystemModelSetupDataCatalog(self.workspace)
+
 
 def _workspace_root(config: Config) -> Path:
     path = Path(config.workspace.path)
     return path if path.is_absolute() else MSD_ROOT / path
+
+
+def workspace_root() -> Path:
+    """Where produced Model Setup Data files live. Public because reading the
+    workspace needs only this path, not a full `Components`: a caller building
+    a catalog has no data-source credentials to supply (see
+    adapters/filesystem_model_setup_data_catalog.py)."""
+    return _workspace_root(get_config())
 
 
 def load_components(

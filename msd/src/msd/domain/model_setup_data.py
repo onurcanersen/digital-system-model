@@ -41,6 +41,11 @@ class ModelSetupData:
     the structural input the model construction process consumes (SRS DSM-CSM
     req 2: accept the Model Setup Data produced by the Model Setup Data
     Generation component).
+
+    `produced_by` names the user who started the run that produced this file —
+    provenance recorded on the artifact for traceability (req 1). msd
+    authenticates nobody; the caller (vae's API, which holds the authenticated
+    session) supplies the name, and it is None when a caller supplies none.
     """
     context: ProjectContext
     inventory: SoftwareUnitVersionInventory
@@ -48,6 +53,7 @@ class ModelSetupData:
     graph: Dict[str, Any]
     validation_errors: List[ValidationError] = field(default_factory=list)
     generated_at: datetime = field(default_factory=datetime.now)
+    produced_by: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -56,5 +62,6 @@ class ModelSetupData:
             "acquired_files": [f.to_dict() for f in self.acquired_files],
             "validation_errors": [e.to_dict() for e in self.validation_errors],
             "generated_at": self.generated_at.isoformat(),
+            "produced_by": self.produced_by,
             "graph": self.graph,
         }

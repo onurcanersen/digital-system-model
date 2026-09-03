@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from msd.domain.acquired_file import AcquiredFile, FileAccessError
-from msd.domain.inventory import SoftwareUnitVersion
+from msd.domain.inventory import CandidateUnitVersion, SoftwareUnitVersion
 from msd.domain.model_setup_data import ModelSetupData
 from msd.domain.status import AcquisitionStatus
 from msd.ports.config_management_repository import IConfigManagementRepository
@@ -81,13 +81,18 @@ class GenerateModelSetupData:
         project_id: Optional[str] = None,
         platform_id: Optional[str] = None,
         version_id: Optional[str] = None,
+        produced_by: Optional[str] = None,
+        candidate: Optional[CandidateUnitVersion] = None,
     ) -> ModelSetupData:
         context_result = self._project_context.execute(project_id, platform_id, version_id)
         if context_result.context is None:
             raise RuntimeError(f"Cannot acquire project context: {context_result.error}")
         context = context_result.context
 
-        inventory = self._inventory.execute(context)
+        # The same candidate the clone step was given, so the inventory this
+        # run records — and the graph built from it — describes the versions
+        # that were actually acquired (req 11).
+        inventory = self._inventory.execute(context, candidate)
 
         dest_root.mkdir(parents=True, exist_ok=True)
         acquired_files: List[AcquiredFile] = []
@@ -119,6 +124,7 @@ class GenerateModelSetupData:
             acquired_files=acquired_files,
             graph=graph,
             validation_errors=validation_errors,
+            produced_by=produced_by,
         )
         self._writer.write(data, output_path)
         logger.info("generate: wrote model setup data to %s", output_path)

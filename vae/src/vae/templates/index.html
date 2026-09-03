@@ -1,1366 +1,2879 @@
-<!doctype html>
-<html lang="en" data-bs-theme="dark">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Digital System Model</title>
-  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" sizes="any">
-  <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon-32x32.png') }}">
-  <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='favicon-16x16.png') }}">
-  <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
-  <link href="{{ url_for('static', filename='vendor/orbitron/orbitron.css') }}" rel="stylesheet">
-  <link href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}" rel="stylesheet">
-  <link href="{{ url_for('static', filename='vendor/bootstrap-icons/bootstrap-icons.min.css') }}" rel="stylesheet">
-  <style>
-    :root {
-      --cyan: #35e7ff;
-      --navy-deep: #04070d;
-    }
-    html, body {
-      margin: 0;
-      height: 100%;
-      background: var(--navy-deep);
-      overflow: hidden;
-      font-family: 'Orbitron', sans-serif;
-    }
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Digital System Model</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='vendor/orbitron/orbitron.css') }}"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='vendor/titillium-web/titillium-web.css') }}"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='vendor/lucide/lucide.css') }}"
+    />
+    <link
+      rel="icon"
+      href="{{ url_for('static', filename='favicon-32x32.png') }}"
+      sizes="32x32"
+    />
+    <style>
+      :root {
+        --cyan: #22e6f5;
+        --cyan-dim: rgba(34, 230, 245, 0.45);
+        --line: rgba(34, 230, 245, 0.18);
+        --ink: #dfeef2;
+        --muted: rgba(223, 238, 242, 0.55);
+        --danger: #ff6b7a;
+        --ok: #35e07f;
+        --warn: #ffc46b;
+      }
 
-    .hero {
-      position: relative;
-      width: 100vw;
-      height: 100vh;
-      height: 100svh;
-      overflow: hidden;
-      background: var(--navy-deep);
-    }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
 
-    @media (max-width: 700px), (max-aspect-ratio: 1/1) {
-      .hero { height: min(100svh, 78vw); }
-    }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        box-sizing: border-box;
+        font-family: "Titillium Web", "Segoe UI", Roboto, Helvetica, Arial,
+          sans-serif;
+        color: var(--ink);
+        background-image: url("{{ url_for('static', filename='bg.jpeg') }}");
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+        background-attachment: fixed;
+      }
 
-    .layer__img {
-      position: absolute; inset: 0;
-      width: 100%; height: 100%;
-      object-fit: cover;
-      object-position: 50% 50%;
-      pointer-events: none;
-      user-select: none;
-      display: block;
-    }
+      /* Where the operator is in the flow after signing in. Completed stages go
+         green, the current one cyan, the rest stay muted; the connector to a
+         stage's left is completed whenever that stage is reached. */
+      .shell {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 22px;
+        width: min(392px, 92vw);
+        /* Centred with auto margins rather than by the body's alignment
+           alone: the run card is tall enough to outgrow a short viewport,
+           and a centred flex item that overflows is unreachable above the
+           fold unless its own margins do the centring. */
+        margin: auto;
+      }
 
-    .login-card {
-      isolation: isolate;
-      max-width: 20rem;
-      overflow: hidden;
-      padding-top: 2.25rem;
-      box-shadow:
-        0 0 0 1px rgba(53,231,255,.06),
-        0 0 60px -12px rgba(53,231,255,.35),
-        0 30px 60px -30px rgba(0,0,0,.8);
-    }
-    @media (min-width: 576px) {
-      .login-card { padding-top: 4rem; }
-    }
-    .login-card__blur {
-      position: absolute; inset: 0; z-index: 0;
-      overflow: hidden;
-      pointer-events: none;
-    }
-    .login-card__blur-img {
-      position: absolute; inset: 0;
-      width: 100%; height: 100%;
-      object-fit: cover;
-      object-position: 50% 50%;
-      filter: blur(28px) saturate(115%) brightness(.75);
-      transform: scale(1.25);
-    }
-    .login-card__tint {
-      position: absolute; inset: 0; z-index: 1;
-      background: rgba(4,7,13,.12);
-      pointer-events: none;
-    }
-    .login-card__content { z-index: 3; }
-    .login-card::before {
-      content: '';
-      position: absolute; inset: 0; z-index: 2; border-radius: inherit; padding: 3px;
-      background: linear-gradient(135deg, rgba(53,231,255,1), rgba(53,231,255,0) 30%, rgba(53,231,255,0) 70%, rgba(53,231,255,.75));
-      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-      -webkit-mask-composite: xor;
-      mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-      mask-composite: exclude;
-      pointer-events: none;
-    }
+      /* Page chrome, pinned to the corner rather than sharing the card's
+         width — at 392px the stepper and the identity crowd each other. */
+      .sessionbar {
+        position: fixed;
+        top: 18px;
+        right: 22px;
+        z-index: 5;
+      }
 
-    .login-icon {
-      height: 6rem;
-      width: 6rem;
-      filter: drop-shadow(0 0 14px rgba(53,231,255,.55));
-    }
-    .login-icon--bi {
-      height: auto;
-      width: auto;
-      font-size: 5.5rem;
-      line-height: 1;
-      color: var(--cyan);
-    }
-    .login-title {
-      font-size: 1.25rem;
-      letter-spacing: .025em;
-    }
-    .login-subtitle {
-      font-size: .75rem;
-      letter-spacing: .2em;
-      color: rgba(103,232,249,.6);
-    }
+      .stepper[hidden] {
+        display: none;
+      }
 
-    .login-error {
-      display: flex;
-      align-items: center;
-      gap: .5rem;
-      padding: .5rem .75rem;
-      border-radius: .5rem;
-      background: rgba(255,71,87,.08);
-      border: 1px solid rgba(255,71,87,.35);
-      box-shadow: 0 0 16px -6px rgba(255,71,87,.5);
-      color: #ff8095;
-      font-size: .7rem;
-      letter-spacing: .03em;
-      line-height: 1.3;
-      text-align: left;
-    }
-    .login-error__icon {
-      flex: none;
-      font-size: .85rem;
-    }
+      .stepper {
+        display: flex;
+        justify-content: center;
+        align-self: center;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
 
-    .login-field-icon {
-      left: .875rem;
-      height: 1rem;
-      width: 1rem;
-      color: rgba(103,232,249,.6);
-    }
-    .login-field input.form-control {
-      background: rgba(255,255,255,.03);
-      border: 1px solid rgba(255,255,255,.1);
-      padding-left: 2.5rem;
-      padding-right: .875rem;
-      padding-top: .625rem;
-      padding-bottom: .625rem;
-      font-size: .875rem;
-      line-height: 1;
-      color: #fff;
-      transition: background .2s ease, border-color .2s ease, box-shadow .2s ease;
-    }
-    .login-field input.form-control::placeholder {
-      color: rgba(255,255,255,.55);
-      letter-spacing: .05em;
-    }
-    .login-field input.form-control:focus {
-      background: rgba(53,231,255,.05);
-      border-color: rgba(255,255,255,.1);
-      box-shadow: 0 0 0 3px rgba(53,231,255,.15), 0 0 20px -4px rgba(53,231,255,.4);
-      color: #fff;
-    }
-    .login-field input.form-control:-webkit-autofill {
-      -webkit-text-fill-color: #e6fbff;
-      -webkit-box-shadow: 0 0 0 1000px rgba(8,16,24,.9) inset;
-      transition: background-color 9999s ease-in-out 0s;
-    }
+      /* Five stages across the shell's 392px, so the basis is what fits
+         rather than a round number. */
+      .stepper__item {
+        position: relative;
+        flex: 0 0 74px;
+      }
 
-    .login-select.form-select {
-      background-color: rgba(255,255,255,.03);
-      border: 1px solid rgba(255,255,255,.1);
-      padding: .625rem 2.25rem .625rem .875rem;
-      font-size: .875rem;
-      line-height: 1;
-      color: #fff;
-      transition: background .2s ease, border-color .2s ease, box-shadow .2s ease, opacity .2s ease;
-    }
-    .login-select.form-select:focus {
-      background-color: rgba(53,231,255,.05);
-      border-color: rgba(255,255,255,.1);
-      box-shadow: 0 0 0 3px rgba(53,231,255,.15), 0 0 20px -4px rgba(53,231,255,.4);
-      color: #fff;
-    }
-    .login-select.form-select:disabled {
-      opacity: .4;
-    }
-    .login-select.form-select option {
-      color: #111;
-    }
+      /* A stage that has been reached is a way back to it; one that has not
+         is inert. This replaces the old back arrow. */
+      .stepper__button {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        text-align: center;
+        cursor: pointer;
+      }
 
-    .login-btn {
-      background: linear-gradient(135deg, #35e7ff, #7bf3ff);
-      box-shadow: 0 0 24px -6px rgba(53,231,255,.7), 0 8px 20px -8px rgba(0,0,0,.6);
-      transition: box-shadow .25s ease, transform .15s ease, filter .2s ease;
-      color: #04070d;
-      line-height: 1.2;
-      border: none;
-    }
-    .login-btn:hover { box-shadow: 0 0 36px -4px rgba(53,231,255,.9), 0 10px 24px -8px rgba(0,0,0,.65); filter: brightness(1.05); color: #04070d; }
-    .login-btn:active { transform: translateY(1px) scale(.99); }
-    .login-btn-sub {
-      font-size: .625rem;
-      letter-spacing: .2em;
-      color: rgba(4,7,13,.7);
-    }
-    .cancel-btn {
-      background: transparent;
-      border: 1px solid rgba(255,71,87,.5);
-      color: #ff8095;
-      box-shadow: 0 0 16px -8px rgba(255,71,87,.6);
-      transition: box-shadow .25s ease, transform .15s ease, filter .2s ease;
-      line-height: 1.2;
-    }
-    .cancel-btn:hover { box-shadow: 0 0 24px -6px rgba(255,71,87,.8); filter: brightness(1.1); color: #ff9cab; }
-    .cancel-btn:active { transform: translateY(1px) scale(.99); }
-    .cancel-btn:disabled { opacity: .5; }
-    .download-btn {
-      background: transparent;
-      border: 1px solid rgba(53,231,255,.5);
-      color: #6fe8ff;
-      box-shadow: 0 0 16px -8px rgba(53,231,255,.6);
-      transition: box-shadow .25s ease, transform .15s ease, filter .2s ease;
-      line-height: 1.2;
-      text-decoration: none;
-      text-align: center;
-    }
-    .download-btn:hover { box-shadow: 0 0 24px -6px rgba(53,231,255,.8); filter: brightness(1.1); color: #9df1ff; }
-    .download-btn:active { transform: translateY(1px) scale(.99); }
+      .stepper__button:disabled {
+        cursor: default;
+      }
 
-    .card-topbar {
-      top: 1rem;
-      left: 1rem;
-      right: 1rem;
-      z-index: 3;
-    }
-    .card-icon-btn {
-      background: transparent;
-      border: none;
-      color: rgba(103,232,249,.6);
-      font-size: 1.3rem;
-      line-height: 1;
-      padding: .25rem;
-      transition: color .2s ease, filter .2s ease;
-    }
-    .card-icon-btn:hover {
-      color: var(--cyan);
-      filter: drop-shadow(0 0 6px rgba(53,231,255,.6));
-    }
-    .back-icon-btn {
-      font-size: 1.75rem;
-    }
-    .topbar-username {
-      font-size: .75rem;
-      letter-spacing: .12em;
-      color: rgba(103,232,249,.6);
-    }
+      .stepper__button:not(:disabled):hover .stepper__mark,
+      .stepper__button:not(:disabled):focus-visible .stepper__mark {
+        border-color: var(--cyan);
+        color: var(--cyan);
+      }
 
-    .run-units {
-      max-height: 16rem;
-      max-height: min(16rem, 45svh);
-      overflow-y: auto;
-      border: 1px solid rgba(255,255,255,.1);
-      border-radius: .5rem;
-      background: rgba(255,255,255,.03);
-      scrollbar-width: thin;
-      scrollbar-color: rgba(53,231,255,.4) transparent;
-    }
-    .run-units::-webkit-scrollbar {
-      width: 6px;
-    }
-    .run-units::-webkit-scrollbar-track {
-      background: transparent;
-    }
-    .run-units::-webkit-scrollbar-thumb {
-      background: rgba(53,231,255,.35);
-      border-radius: 3px;
-    }
-    .run-units ul {
-      list-style: none;
-      margin: 0;
-      padding: 0;
-    }
-    .run-unit {
-      display: flex;
-      align-items: center;
-      gap: .5rem;
-      padding: .4rem .6rem;
-      border-bottom: 1px solid rgba(255,255,255,.06);
-      font-size: .7rem;
-      letter-spacing: .02em;
-    }
-    .run-unit:last-child {
-      border-bottom: none;
-    }
-    .run-unit__id {
-      flex: 1 1 auto;
-      min-width: 0;
-      display: flex;
-      align-items: baseline;
-      gap: .35rem;
-    }
-    .run-unit__name {
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      color: #fff;
-    }
-    .run-unit__version {
-      flex: none;
-      color: rgba(103,232,249,.6);
-    }
-    .run-units__placeholder {
-      margin: 0;
-      padding: 1rem .6rem;
-      text-align: center;
-      font-size: .7rem;
-      letter-spacing: .15em;
-      color: rgba(103,232,249,.5);
-    }
-    .run-units .login-error {
-      margin: .3rem;
-    }
-    .run-output {
-      overflow-y: auto;
-      max-height: 10rem;
-      border: 1px solid rgba(53,231,255,.25);
-      border-radius: .5rem;
-      background: rgba(4,7,13,.55);
-      padding: .5rem .6rem;
-      margin-bottom: .75rem;
-      text-align: left;
-      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-      font-size: .65rem;
-      line-height: 1.5;
-      color: rgba(103,232,249,.85);
-      white-space: pre-wrap;
-      word-break: break-word;
-      scrollbar-width: thin;
-      scrollbar-color: rgba(53,231,255,.4) transparent;
-    }
-    .run-count {
-      flex: none;
-      font-size: .6rem;
-      letter-spacing: .1em;
-      color: var(--cyan);
-      border: 1px solid rgba(53,231,255,.4);
-      border-radius: 1rem;
-      padding: .05rem .5rem;
-    }
-    .run-badge {
-      flex: none;
-      font-size: .55rem;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-      padding: .1rem .4rem;
-      border-radius: 1rem;
-      border: 1px solid;
-      white-space: nowrap;
-    }
-    .run-badge--cloned,
-    .run-badge--ok {
-      color: #6ff2c8;
-      border-color: rgba(111,242,200,.4);
-      background: rgba(111,242,200,.08);
-    }
-    .run-badge--present,
-    .run-badge--not-cloned,
-    .run-badge--unknown {
-      color: rgba(230,240,255,.65);
-      border-color: rgba(230,240,255,.25);
-      background: rgba(230,240,255,.06);
-    }
-    .run-badge--missing {
-      color: #ffd166;
-      border-color: rgba(255,209,102,.4);
-      background: rgba(255,209,102,.08);
-    }
-    .run-badge--clone-error,
-    .run-badge--gen-error {
-      color: #ff8095;
-      border-color: rgba(255,71,87,.4);
-      background: rgba(255,71,87,.08);
-    }
-    /* Fallback for short viewports: keep the whole card reachable (the hero
-    clips overflow), so the card itself scrolls when its content is taller
-    than the viewport. The run card also gets a wider max-width than the
-    other cards so unit name/version/badges fit without heavy truncation. */
-    #runCard {
-      max-width: 40rem;
-      max-height: 100vh;
-      max-height: 100svh;
-      overflow-y: auto;
-      scrollbar-width: thin;
-      scrollbar-color: rgba(53,231,255,.4) transparent;
-    }
-    #runCard::-webkit-scrollbar {
-      width: 6px;
-    }
-    #runCard::-webkit-scrollbar-track {
-      background: transparent;
-    }
-    #runCard::-webkit-scrollbar-thumb {
-      background: rgba(53,231,255,.35);
-      border-radius: 3px;
-    }
-  </style>
-</head>
-<body>
-  <main class="hero">
-    <img class="layer__img" src="{{ url_for('static', filename='bg.jpeg') }}"
-         alt="" fetchpriority="high">
+      .stepper__button:not(:disabled):hover .stepper__name,
+      .stepper__button:not(:disabled):focus-visible .stepper__name {
+        color: var(--cyan);
+      }
 
-    {% macro card(id, title, subtitle, tag='div', hidden=False, attrs='', show_logout=False, show_back=False, icon=None) %}
-    <{{ tag }} id="{{ id }}" class="login-card{% if hidden %} d-none{% endif %} pe-auto position-relative w-100 rounded-4 px-3 px-sm-4 pb-4 pb-sm-5"{% if attrs %} {{ attrs|safe }}{% endif %}>
-      <div class="login-card__blur" aria-hidden="true">
-        <img class="login-card__blur-img" src="{{ url_for('static', filename='bg.jpeg') }}" alt="">
-      </div>
-      <div class="login-card__tint" aria-hidden="true"></div>
+      .stepper__item::before {
+        content: "";
+        position: absolute;
+        top: 13px;
+        left: -50%;
+        width: 100%;
+        height: 2px;
+        background-color: var(--line);
+      }
 
-      {% if show_logout or show_back %}
-      <div class="card-topbar position-absolute d-flex align-items-center justify-content-between">
-        <div>
-          {% if show_back %}
-          <button type="button" id="{{ id }}-back" class="card-icon-btn back-icon-btn" aria-label="Back" title="Back">
-            <i class="bi bi-arrow-left"></i>
+      .stepper__item:first-child::before {
+        display: none;
+      }
+
+      .stepper__item[data-state="done"]::before,
+      .stepper__item[data-state="current"]::before {
+        background-color: var(--ok);
+        box-shadow: 0 0 10px rgba(53, 224, 127, 0.5);
+      }
+
+      .stepper__mark {
+        position: relative;
+        z-index: 1;
+        /* 28px including the border, so the connector's 13px offset lands on
+           the circle's centre rather than 3px above it. */
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border: 2px solid var(--line);
+        border-radius: 50%;
+        background-color: #06202b;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 600;
+        /* The glyph and the digit both sit on the circle's centre line. */
+        line-height: 1;
+      }
+
+      .stepper__num {
+        display: block;
+        line-height: 1;
+      }
+
+      .stepper__item[data-state="done"] .stepper__mark {
+        border-color: var(--ok);
+        color: var(--ok);
+        box-shadow: 0 0 12px rgba(53, 224, 127, 0.45);
+      }
+
+      .stepper__item[data-state="current"] .stepper__mark {
+        border-color: var(--cyan);
+        color: var(--cyan);
+        box-shadow: 0 0 16px rgba(34, 230, 245, 0.55);
+      }
+
+      /* One mark holds all three glyphs; state decides which one shows. */
+      .stepper__mark .lucide {
+        display: none;
+        font-size: 13px;
+        line-height: 1;
+      }
+
+      .stepper__item[data-state="done"] .lucide-check {
+        display: block;
+      }
+
+      /* Only a completed stage swaps its number for a check; the current
+         stage keeps its number, in cyan. */
+      .stepper__item[data-state="done"] .stepper__num {
+        display: none;
+      }
+
+      .stepper__name {
+        font-size: 9px;
+        white-space: nowrap;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .stepper__item[data-state="done"] .stepper__name {
+        color: rgba(53, 224, 127, 0.85);
+      }
+
+      .stepper__item[data-state="current"] .stepper__name {
+        color: var(--cyan);
+      }
+
+      @media (max-width: 420px) {
+        .stepper__item {
+          flex-basis: 62px;
+        }
+      }
+
+      .card {
+        position: relative;
+        box-sizing: border-box;
+        width: min(292px, 92vw);
+        padding: 36px 26px 28px;
+        border: 2px solid rgba(34, 230, 245, 0.3);
+        border-radius: 14px;
+        box-shadow: inset 0 0 60px rgba(34, 230, 245, 0.06);
+        transition: width 0.3s ease;
+      }
+
+      /* The context steps carry more text than the sign-in form. */
+      .card--wide {
+        width: min(392px, 92vw);
+      }
+
+      /* The sources, context and inventory cards differ in content height;
+         holding the tallest of them steady stops the card resizing as the
+         operator moves between stages. */
+      .card--wide .card__body {
+        min-height: 268px;
+      }
+
+      /* Frosted panel without backdrop-filter (unsupported in Firefox < 103):
+         a clipped copy of the page background, blurred with a plain filter. */
+      .card__blur {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        border-radius: 12px;
+        z-index: 0;
+      }
+
+      /* background-attachment: fixed paints against the viewport, exactly like
+         body does, so this copy stays registered with the page background no
+         matter where the card sits. The negative inset keeps the blur's soft
+         edge outside the clip, so the panel has no faded rim. */
+      .card__blur::before {
+        content: "";
+        position: absolute;
+        inset: -24px;
+        background-image: url("{{ url_for('static', filename='bg.jpeg') }}");
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+        background-attachment: fixed;
+        filter: blur(3px);
+      }
+
+      .card__blur::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background-color: rgba(6, 26, 36, 0.42);
+      }
+
+      /* Four glowing corner brackets, sitting on top of the card border. */
+      .card::before,
+      .card::after,
+      .card__corners::before,
+      .card__corners::after {
+        content: "";
+        position: absolute;
+        width: 38px;
+        height: 38px;
+        border: 3px solid var(--cyan);
+        /* .card::before precedes the child layers in paint order, so without
+           this the blur panel's tint washes out the top-left bracket. */
+        z-index: 1;
+        /* Layered drop-shadows follow the whole L outline, so the arm tips
+           glow as strongly as the corner itself. */
+        filter: drop-shadow(0 0 3px rgba(34, 230, 245, 0.95))
+          drop-shadow(0 0 8px rgba(34, 230, 245, 0.7))
+          drop-shadow(0 0 16px rgba(34, 230, 245, 0.4));
+      }
+
+      .card__corners {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+
+      /* Top brackets carry a longer vertical arm than the bottom pair. */
+      .card::before,
+      .card::after {
+        height: 62px;
+      }
+
+      .card::before {
+        top: -2px;
+        left: -2px;
+        border-right: 0;
+        border-bottom: 0;
+        border-top-left-radius: 14px;
+      }
+
+      .card::after {
+        top: -2px;
+        right: -2px;
+        border-left: 0;
+        border-bottom: 0;
+        border-top-right-radius: 14px;
+      }
+
+      .card__corners::before {
+        bottom: -2px;
+        left: -2px;
+        border-right: 0;
+        border-top: 0;
+        border-bottom-left-radius: 14px;
+      }
+
+      .card__corners::after {
+        bottom: -2px;
+        right: -2px;
+        border-left: 0;
+        border-top: 0;
+        border-bottom-right-radius: 14px;
+      }
+
+      .card__body {
+        position: relative;
+        z-index: 1;
+      }
+
+      .title {
+        margin: 0;
+        font-family: Orbitron, "Titillium Web", sans-serif;
+        font-weight: 700;
+        font-size: 20px;
+        line-height: 1.3;
+        letter-spacing: 0.06em;
+        text-align: center;
+        text-transform: uppercase;
+        text-shadow: 0 0 18px rgba(34, 230, 245, 0.35);
+      }
+
+      /* The product's own mark, on the sign-in card only. */
+      .logo {
+        display: block;
+        width: auto;
+        height: 92px;
+        margin: 16px auto 0;
+        filter: drop-shadow(0 0 14px rgba(34, 230, 245, 0.35));
+      }
+
+      .logo[hidden] {
+        display: none;
+      }
+
+      /* Glyph for cards that are about one thing rather than the product. */
+      .brand-icon {
+        display: block;
+        margin: 16px auto 0;
+        font-size: 60px;
+        line-height: 1;
+        text-align: center;
+        color: var(--cyan);
+        filter: drop-shadow(0 0 14px rgba(34, 230, 245, 0.35));
+      }
+
+      .brand-icon[hidden] {
+        display: none;
+      }
+
+      .subtitle {
+        margin: 22px 0 32px;
+        font-family: Orbitron, "Titillium Web", sans-serif;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.2em;
+        text-align: center;
+        text-transform: uppercase;
+        color: var(--cyan);
+      }
+
+      .subtitle[hidden] {
+        display: none;
+      }
+
+      /* The pickers put a label of their own between the subtitle and the
+         first control, so the subtitle gives that space back — leaving the
+         gap down to the first bordered box the same as every other view's. */
+      .card[data-view="select"] .subtitle {
+        margin-bottom: 15px;
+      }
+
+      /* No subtitle on this one — the context path stands in for it, so the
+         view opens with the same 22px the subtitle's top margin gives every
+         other card. */
+      #view-inventory {
+        margin-top: 22px;
+      }
+
+      /* Wider than the rest: a unit name and its version sit on one row, and
+         the context path reads as a path rather than wrapping. */
+      .card[data-view="inventory"] {
+        width: min(480px, 94vw);
+      }
+
+      /* The same width, for the same reason: a produced file's timestamp and
+         producer share a row with the two things you can do to it, and at the
+         standard 392px they would not. */
+      .card[data-view="files"] {
+        width: min(480px, 94vw);
+      }
+
+      /* The run view is a console, not a card: the shell widens to the log's
+         measure and stretches to the body's full content height, so nothing
+         here has to overflow to be read. min(…, 100%) rather than a vw cap
+         keeps the card inside the body's 24px padding at every size. */
+      .shell--run {
+        width: min(1040px, 100%);
+        align-self: stretch;
+        margin: 0 auto;
+      }
+
+      /* Widest of all: the worker's log is the point of this card, so it takes
+         the shell's full width. */
+      .card[data-view="run"] {
+        width: 100%;
+        /* Tighter above than the form cards — every row saved is a row of log
+           — but the same 28px below, so the buttons stand off the card's edge
+           exactly as they do everywhere else. */
+        padding: 28px 26px 28px;
+      }
+
+      .card[data-view="run"] .subtitle {
+        margin: 12px 0 16px;
+      }
+
+      /* Height flows down one chain — card → body → view → panel → console —
+         so the log absorbs whatever the header, bar and actions leave. Each
+         link needs min-height: 0, or a flex item refuses to shrink past its
+         own content; on .card__body it also beats .card--wide's 268px floor,
+         which exists to steady the earlier stages and has nothing to do here.
+         The run view is matched with :not([hidden]) because an id outranks the
+         .view[hidden] rule under this one. */
+      .shell--run .card,
+      .shell--run .card__body,
+      .shell--run #view-run:not([hidden]),
+      .shell--run .runpanel {
+        display: flex;
+        flex: 1 1 auto;
+        flex-direction: column;
+        min-height: 0;
+      }
+
+      .view[hidden] {
+        display: none;
+      }
+
+      .field {
+        position: relative;
+        display: flex;
+        align-items: center;
+        margin-bottom: 10px;
+        border: 1px solid var(--cyan-dim);
+        border-radius: 6px;
+        background-color: rgba(4, 22, 31, 0.5);
+        transition: border-color 0.2s, box-shadow 0.2s;
+      }
+
+      .field:focus-within {
+        border-color: var(--cyan);
+        box-shadow: 0 0 0 1px rgba(34, 230, 245, 0.35),
+          0 0 16px rgba(34, 230, 245, 0.28);
+      }
+
+      .field > .lucide {
+        padding: 0 12px;
+        font-size: 16px;
+        color: var(--cyan);
+        opacity: 0.85;
+      }
+
+      .field input {
+        flex: 1;
+        min-width: 0;
+        padding: 10px 12px 10px 0;
+        border: 0;
+        background: transparent;
+        color: var(--ink);
+        caret-color: var(--cyan);
+        font: inherit;
+        font-size: 13px;
+        outline: none;
+      }
+
+      .field input::placeholder {
+        color: var(--muted);
+        letter-spacing: 0.09em;
+      }
+
+      .field input:-webkit-autofill {
+        -webkit-text-fill-color: var(--ink);
+        -webkit-box-shadow: 0 0 0 1000px #08242f inset;
+      }
+
+      .reveal {
+        padding: 0 12px;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        font-size: 16px;
+        line-height: 1;
+        cursor: pointer;
+        transition: color 0.2s;
+      }
+
+      .reveal:hover,
+      .reveal:focus-visible {
+        color: var(--cyan);
+      }
+
+      /* Message strip: hidden until it carries text, so the resting form has
+         no dead band. */
+      .message {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        margin: 4px 0 12px;
+        padding: 8px 10px;
+        border: 1px solid rgba(255, 107, 122, 0.35);
+        border-radius: 4px;
+        background-color: rgba(255, 107, 122, 0.1);
+        color: var(--danger);
+        font-size: 11.5px;
+        line-height: 1.35;
+        letter-spacing: 0.03em;
+        animation: message-in 0.22s ease-out;
+      }
+
+      .message:empty {
+        display: none;
+      }
+
+      .message .lucide {
+        flex: none;
+        font-size: 13px;
+        line-height: 1.2;
+      }
+
+      .message--ok {
+        border-color: rgba(34, 230, 245, 0.35);
+        background-color: rgba(34, 230, 245, 0.1);
+        color: var(--cyan);
+      }
+
+      @keyframes message-in {
+        from {
+          opacity: 0;
+          transform: translateY(-3px);
+        }
+      }
+
+      /* The tiles' own status lines sit directly above, so the strip needs
+         room of its own not to read as part of the second tile. */
+      #view-sources .message:not(:empty) {
+        margin-top: 18px;
+      }
+
+      /* Actions own the gap above themselves, so it is the same whether or
+         not a message strip is showing. */
+      .actions {
+        display: flex;
+        flex-direction: column;
+        gap: 9px;
+        margin-top: 24px;
+      }
+
+      .message:not(:empty) + .actions {
+        margin-top: 8px;
+      }
+
+      /* The run view is a flex column, and flex containers do not collapse
+         margins: the strip's 12px below and the row's 8px above would stack
+         to 20px there, where every block-flow card collapses the pair to 12px.
+         The strip keeps its margin and the row gives up its own. */
+      .shell--run .message:not(:empty) + .actions {
+        margin-top: 0;
+      }
+
+      /* Sign-in has the least content, so it gets the most breathing room
+         between the last field and the command bar. */
+      #view-login .actions {
+        margin-top: 34px;
+      }
+
+      #view-login .message:not(:empty) + .actions {
+        margin-top: 10px;
+      }
+
+      .actions[hidden] {
+        display: none;
+      }
+
+      /* Submit: a bordered command bar. Hover sweeps a solid cyan fill in
+         from the left and flips the label to dark ink. */
+      .submit {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        padding: 12px 16px;
+        overflow: hidden;
+        border: 1px solid var(--cyan);
+        border-radius: 6px;
+        background-color: rgba(34, 230, 245, 0.07);
+        color: var(--cyan);
+        font: inherit;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        text-decoration: none;
+        cursor: pointer;
+        transition: color 0.28s ease, box-shadow 0.28s ease;
+      }
+
+      /* display:flex above would otherwise beat the hidden attribute the run
+         card toggles these with. */
+      .submit[hidden] {
+        display: none;
+      }
+
+      .submit::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background-color: var(--cyan);
+        transform: scaleX(0);
+        transform-origin: left center;
+        transition: transform 0.32s ease;
+      }
+
+      /* Lift the label above the sweeping fill. */
+      .submit > * {
+        position: relative;
+        z-index: 1;
+      }
+
+      .submit__arrow {
+        margin-left: 10px;
+        font-size: 18px;
+        line-height: 1;
+        transition: transform 0.28s ease;
+      }
+
+      .submit:hover:not(:disabled),
+      .submit:focus-visible:not(:disabled) {
+        color: #04222c;
+        outline: none;
+        box-shadow: 0 0 26px rgba(34, 230, 245, 0.45);
+      }
+
+      .submit:hover:not(:disabled)::before,
+      .submit:focus-visible:not(:disabled)::before {
+        transform: scaleX(1);
+      }
+
+      .submit:hover:not(:disabled) .submit__arrow,
+      .submit:focus-visible:not(:disabled) .submit__arrow {
+        transform: translateX(4px);
+      }
+
+      .submit:active:not(:disabled) {
+        box-shadow: 0 0 12px rgba(34, 230, 245, 0.35);
+      }
+
+      .submit:disabled {
+        cursor: not-allowed;
+        border-color: var(--cyan-dim);
+        color: var(--muted);
+      }
+
+      .submit:disabled .submit__arrow {
+        display: none;
+      }
+
+      /* Secondary action: same bar, no fill. */
+      .submit--ghost {
+        border-color: var(--line);
+        background-color: transparent;
+        color: var(--muted);
+        font-size: 11px;
+        letter-spacing: 0.16em;
+      }
+
+      .submit--ghost::before {
+        display: none;
+      }
+
+      /* Sized to its own label rather than the row: in the run card's single
+         action row, the width belongs to the action the operator came for.
+         After --ghost, so a bar carrying both ends up compact. */
+      .submit--compact {
+        flex: none;
+        gap: 8px;
+        width: auto;
+        padding: 10px 14px;
+        font-size: 11px;
+        letter-spacing: 0.14em;
+      }
+
+      .submit--ghost:hover:not(:disabled),
+      .submit--ghost:focus-visible:not(:disabled) {
+        border-color: var(--cyan-dim);
+        color: var(--cyan);
+        box-shadow: none;
+      }
+
+      /* The bar a finished run hands you: same command bar in the green the
+         rest of the page already spends on a good outcome, so it reads as the
+         reward for the run rather than one more cyan step. After the base
+         rules, which it overrides at equal specificity. */
+      .submit--ok {
+        border-color: var(--ok);
+        background-color: rgba(53, 224, 127, 0.07);
+        color: var(--ok);
+      }
+
+      .submit--ok::before {
+        background-color: var(--ok);
+      }
+
+      .submit--ok:hover:not(:disabled),
+      .submit--ok:focus-visible:not(:disabled) {
+        color: #04220f;
+        box-shadow: 0 0 26px rgba(53, 224, 127, 0.45);
+      }
+
+      .submit--ok:active:not(:disabled) {
+        box-shadow: 0 0 12px rgba(53, 224, 127, 0.35);
+      }
+
+      .submit--ok:disabled {
+        border-color: rgba(53, 224, 127, 0.45);
+      }
+
+      .spinner {
+        display: inline-block;
+        width: 13px;
+        height: 13px;
+        vertical-align: -2px;
+        border: 2px solid rgba(34, 230, 245, 0.25);
+        border-top-color: var(--cyan);
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+      }
+
+      .submit__label .spinner {
+        margin-right: 9px;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* Cascading context pickers. */
+      .label {
+        display: block;
+        margin: 0 0 5px;
+        /* Pinned, so the subtitle's compensation above is exact rather than
+           at the mercy of the font's default line box. */
+        line-height: 1.2;
+        font-size: 9.5px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .picker {
+        margin-bottom: 12px;
+      }
+
+      .picker__control {
+        position: relative;
+        display: flex;
+        align-items: center;
+        border: 1px solid var(--cyan-dim);
+        border-radius: 6px;
+        background-color: rgba(4, 22, 31, 0.5);
+        transition: border-color 0.2s, box-shadow 0.2s, opacity 0.2s;
+      }
+
+      .picker__control:focus-within {
+        border-color: var(--cyan);
+        box-shadow: 0 0 0 1px rgba(34, 230, 245, 0.35),
+          0 0 16px rgba(34, 230, 245, 0.28);
+      }
+
+      .picker__control .lucide {
+        position: absolute;
+        right: 11px;
+        font-size: 12px;
+        color: var(--cyan);
+        pointer-events: none;
+      }
+
+      .picker select {
+        width: 100%;
+        padding: 10px 32px 10px 12px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--ink);
+        font: inherit;
+        font-size: 13px;
+        outline: none;
+        cursor: pointer;
+        /* Drop the platform chrome; the chevron above stands in for it. */
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        appearance: none;
+      }
+
+      /* The dropdown list is painted by the OS, so it needs its own colors. */
+      .picker select option {
+        background-color: #06202b;
+        color: var(--ink);
+      }
+
+      .picker select:disabled {
+        cursor: not-allowed;
+        color: var(--muted);
+      }
+
+      .picker--disabled .picker__control {
+        border-color: var(--line);
+        opacity: 0.6;
+      }
+
+      /* One tile per data source, each opening the connection modal, each
+         saying underneath whether this session holds that connection. */
+      .sources {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 14px;
+      }
+
+      @media (max-width: 360px) {
+        .sources {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .source__tile {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        width: 100%;
+        min-height: 104px;
+        padding: 16px 10px;
+        box-sizing: border-box;
+        border: 1px solid var(--cyan-dim);
+        border-radius: 8px;
+        background-color: rgba(4, 22, 31, 0.5);
+        color: var(--ink);
+        font: inherit;
+        cursor: pointer;
+        transition: border-color 0.2s, box-shadow 0.2s;
+      }
+
+      .source__tile:hover,
+      .source__tile:focus-visible {
+        border-color: var(--cyan);
+        outline: none;
+        box-shadow: 0 0 0 1px rgba(34, 230, 245, 0.35),
+          0 0 16px rgba(34, 230, 245, 0.28);
+      }
+
+      .source__icon {
+        font-size: 34px;
+        line-height: 1;
+        color: var(--cyan);
+        filter: drop-shadow(0 0 10px rgba(34, 230, 245, 0.35));
+      }
+
+      .source__name {
+        font-size: 10px;
+        line-height: 1.3;
+        letter-spacing: 0.14em;
+        text-align: center;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .source[data-state="on"] .source__tile {
+        border-color: rgba(53, 224, 127, 0.45);
+      }
+
+      .source[data-state="on"] .source__name {
+        color: var(--ink);
+      }
+
+      .source__state {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        margin: 9px 0 0;
+        font-size: 10px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .source__dot {
+        flex: none;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background-color: var(--muted);
+      }
+
+      .source[data-state="on"] .source__state {
+        color: var(--ok);
+      }
+
+      .source[data-state="on"] .source__dot {
+        background-color: var(--ok);
+        box-shadow: 0 0 8px rgba(53, 224, 127, 0.9);
+      }
+
+      /* Connection details, over the card rather than inside it: the tiles
+         stay visible behind the scrim, so it is clear which source is being
+         connected. A plain overlay, not <dialog> — same reason the card's
+         frosted panel avoids backdrop-filter. */
+      .modal {
+        position: fixed;
+        inset: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        box-sizing: border-box;
+      }
+
+      .modal[hidden] {
+        display: none;
+      }
+
+      .modal__scrim {
+        position: absolute;
+        inset: 0;
+        background-color: rgba(3, 16, 23, 0.72);
+      }
+
+      .modal__panel {
+        position: relative;
+        box-sizing: border-box;
+        width: min(340px, 92vw);
+        max-height: 100%;
+        overflow-y: auto;
+        padding: 26px 26px 24px;
+        border: 2px solid rgba(34, 230, 245, 0.3);
+        border-radius: 14px;
+        background-color: #06202b;
+        box-shadow: inset 0 0 60px rgba(34, 230, 245, 0.06),
+          0 0 40px rgba(3, 16, 23, 0.6);
+        animation: modal-in 0.18s ease-out;
+      }
+
+      @keyframes modal-in {
+        from {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+      }
+
+      .modal__close {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+      }
+
+      .modal__icon {
+        display: block;
+        margin: 0 auto 14px;
+        font-size: 40px;
+        line-height: 1;
+        text-align: center;
+        color: var(--cyan);
+        filter: drop-shadow(0 0 14px rgba(34, 230, 245, 0.35));
+      }
+
+      .modal__title {
+        font-size: 15px;
+      }
+
+      .modal__panel .subtitle {
+        margin: 14px 0 22px;
+      }
+
+      /* The confirmed context, as one slash-separated path above the
+         inventory it scopes — bare, standing in for this card's subtitle. */
+      .context {
+        display: flex;
+        align-items: baseline;
+        justify-content: center;
+        gap: 8px;
+        /* The 32px every other card's subtitle leaves under itself. */
+        margin: 0 0 32px;
+        overflow: hidden;
+      }
+
+      /* Set like the subtitle it stands in for on this card. */
+      .context__cell {
+        min-width: 0;
+        overflow: hidden;
+        font-family: Orbitron, "Titillium Web", sans-serif;
+        font-size: 11px;
+        font-weight: 600;
+        line-height: 1.3;
+        letter-spacing: 0.2em;
+        text-overflow: ellipsis;
+        text-transform: uppercase;
+        white-space: nowrap;
+        color: var(--cyan);
+      }
+
+      .context__cell + .context__cell::before {
+        content: "/";
+        margin-right: 8px;
+        color: var(--muted);
+      }
+
+      /* Read aloud, never drawn — the strip is one line, and a visible key
+         would double its height for meaning the order already gives. */
+      .context__key {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+      }
+
+      /* The effective version, marked inline so saying so costs the line no
+         height at all. Set exactly like the path it sits in, and told apart
+         by colour alone — green, since the path around it is all cyan. */
+      .context__flag {
+        color: var(--ok);
+      }
+
+      .context__flag[hidden] {
+        display: none;
+      }
+
+      /* Filter row, sharing the list's box: no border of its own beyond the
+         rule that separates it from the rows it narrows. */
+      .units__search {
+        display: flex;
+        align-items: center;
+        border-bottom: 1px solid var(--line);
+        background-color: rgba(4, 22, 31, 0.5);
+      }
+
+      .units__search > .lucide {
+        padding: 0 10px;
+        font-size: 13px;
+        color: var(--cyan);
+        opacity: 0.85;
+      }
+
+      .units__search input {
+        flex: 1;
+        min-width: 0;
+        padding: 8px 12px 8px 0;
+        border: 0;
+        background: transparent;
+        color: var(--ink);
+        caret-color: var(--cyan);
+        font: inherit;
+        font-size: 12px;
+        outline: none;
+      }
+
+      .units__search input::placeholder {
+        color: var(--muted);
+        letter-spacing: 0.09em;
+      }
+
+      /* How many units are listed, and how many of the total when a filter
+         is narrowing them. */
+      .units__count {
+        flex: none;
+        padding: 0 12px;
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        white-space: nowrap;
+        color: var(--muted);
+      }
+
+      /* Filter and rows in one box; only the rows scroll, so the filter and
+         its count stay pinned while a long inventory moves under them. */
+      .units {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        overflow: hidden;
+        transition: border-color 0.2s, box-shadow 0.2s;
+      }
+
+      .units:focus-within {
+        border-color: var(--cyan);
+        box-shadow: 0 0 0 1px rgba(34, 230, 245, 0.35),
+          0 0 16px rgba(34, 230, 245, 0.28);
+      }
+
+      /* The floor that keeps a filtered list from shrinking the box is set
+         in script, from the height the full list settles at.
+
+         The cap is viewport-relative as well as absolute: this is the one
+         card whose content has no bound — a system version can define any
+         number of units — and the list is the only part of it that can give
+         way, so on a short screen it yields rather than pushing the Produce
+         button past the fold. */
+      .units__list {
+        max-height: min(190px, 22vh);
+        overflow-y: auto;
+      }
+
+      .units__row {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        padding: 9px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .units__row:last-child {
+        border-bottom: 0;
+      }
+
+      .units__name {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        font-size: 12.5px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .units__version {
+        flex: none;
+        font-size: 11.5px;
+        letter-spacing: 0.04em;
+        color: var(--cyan);
+      }
+
+      /* The version being evaluated for installation, not the one this
+         system version pins. */
+      .units__badge {
+        flex: none;
+        padding: 2px 7px;
+        border: 1px solid rgba(53, 224, 127, 0.45);
+        border-radius: 999px;
+        font-size: 8.5px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--ok);
+      }
+
+      /* The candidate version under evaluation (SRS DSM-MSD req 11), as the
+         inventory box's last row — it rewrites a row of the list above, so
+         it sits inside the same frame, on the filter row's tint so the two
+         controls that bracket the list read as a pair. One line, because a
+         run evaluates at most one unit: stacking two labelled pickers under
+         the box instead cost the card a fold's worth of height. */
+      .units__candidate {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 12px;
+        border-top: 1px solid var(--line);
+        background-color: rgba(4, 22, 31, 0.5);
+      }
+
+      /* The sentence the row reads as. The selects carry their own
+         aria-labels, so these are decoration for screen readers. */
+      .units__candidate-key {
+        flex: none;
+        font-size: 9.5px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      /* The two selects split what the words leave, so neither truncates
+         while the other has room going spare. */
+      .units__candidate .picker {
+        flex: 1;
+        min-width: 0;
+        margin-bottom: 0;
+      }
+
+      /* Inside the box the control is one row among others, not a field of
+         its own: the quieter border and tighter metrics keep it from
+         outweighing the inventory it belongs to. */
+      .picker--inline .picker__control {
+        border-color: var(--line);
+      }
+
+      .picker--inline select {
+        padding: 6px 25px 6px 10px;
+        font-size: 11.5px;
+      }
+
+      .picker--inline .picker__control .lucide {
+        right: 9px;
+        font-size: 10px;
+      }
+
+      /* What the version list is doing, or why it is empty. Out of the layout
+         entirely when it has nothing to say — a permanently reserved line
+         under the box is dead space on every visit, and this speaks on few. */
+      .candidate__note {
+        margin: 8px 0 0;
+        font-size: 10.5px;
+        line-height: 1.35;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+      }
+
+      .candidate__note:empty {
+        display: none;
+      }
+
+      .candidate__note--error {
+        color: var(--danger);
+      }
+
+      /* What has already been produced for this context, above the button
+         that would produce another (req 5). Scoped by project/platform/
+         version, not by user: each row names its producer instead. */
+      .files {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        overflow: hidden;
+      }
+
+      .files__label {
+        display: block;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--line);
+        background-color: rgba(4, 22, 31, 0.5);
+        font-size: 9px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .files__list {
+        max-height: 168px;
+        margin: 0;
+        padding: 0;
+        overflow-y: auto;
+        list-style: none;
+      }
+
+      .filerow {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .filerow:last-child {
+        border-bottom: 0;
+      }
+
+      /* The identity of the file — when, by whom, how big — as one column, so
+         the two actions sit at a single predictable end of every row. */
+      .filerow__main {
+        display: flex;
+        flex: 1;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 3px 10px;
+        min-width: 0;
+      }
+
+      .filerow__when {
+        font-size: 12px;
+      }
+
+      .filerow__by {
+        font-size: 11px;
+        letter-spacing: 0.04em;
+        color: var(--cyan);
+      }
+
+      .filerow__scale {
+        flex-basis: 100%;
+        font-size: 10.5px;
+        color: var(--muted);
+      }
+
+      .filerow__actions {
+        display: flex;
+        flex: none;
+        gap: 6px;
+      }
+
+      .filerow__actions .submit {
+        gap: 6px;
+        padding: 3px 9px;
+        font-size: 10px;
+        line-height: 1;
+      }
+
+      .files__empty {
+        padding: 12px;
+        font-size: 11.5px;
+        color: var(--muted);
+      }
+
+      /* Where the run stands, and the log it is producing: one terminal
+         panel, its chrome bar carrying the state and the result tally so
+         neither costs a row of the console's own height (req 6). */
+      .runpanel {
+        position: relative;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background-color: rgba(2, 14, 20, 0.72);
+        transition: border-color 0.3s ease;
+      }
+
+      .runpanel__bar {
+        position: relative;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px 10px;
+        overflow: hidden;
+        /* Held at the height the rocket and label alone give it, so the bar
+           does not grow the moment the stop button joins them. */
+        min-height: 38px;
+        box-sizing: border-box;
+        padding: 9px 12px;
+        border-bottom: 1px solid var(--line);
+        background-color: rgba(4, 22, 31, 0.5);
+      }
+
+      /* Stop, at chrome scale: a bar control rather than one of the card's
+         command bars, and the one destructive thing on this card — so it is
+         the only control here that reads in the danger colour rather than the
+         cyan every other action shares. After --ghost and --compact, so its
+         colour, padding and size all win. */
+      .runpanel__stop {
+        /* The bar's far end, the same end the chips take — the two never show
+           together, so neither has to give way. */
+        margin-left: auto;
+        gap: 6px;
+        padding: 3px 9px;
+        border-color: rgba(255, 107, 122, 0.4);
+        color: var(--danger);
+        font-size: 10px;
+        line-height: 1;
+      }
+
+      .runpanel__stop .lucide {
+        font-size: 12px;
+      }
+
+      /* --ghost's hover flips to cyan, which would undo the warning this
+         button is carrying; it brightens in its own colour instead. */
+      .runpanel__stop:hover:not(:disabled),
+      .runpanel__stop:focus-visible:not(:disabled) {
+        border-color: var(--danger);
+        background-color: rgba(255, 107, 122, 0.12);
+        color: var(--danger);
+      }
+
+      /* The busy spinner is sized and coloured for a full command bar: at 13px
+         it would push the bar taller for as long as the cancel is in flight,
+         and cyan would read as a different control than the one just pressed. */
+      .runpanel__stop .spinner {
+        width: 10px;
+        height: 10px;
+        vertical-align: -1px;
+        border-width: 1px;
+        border-color: rgba(255, 107, 122, 0.25);
+        border-top-color: var(--danger);
+      }
+
+      .runpanel__stop .submit__label .spinner {
+        margin-right: 6px;
+      }
+
+      /* Cancelling: still the live thing in the bar, so it holds its colour
+         and only gives up the affordance. */
+      .runpanel__stop:disabled {
+        border-color: rgba(255, 107, 122, 0.25);
+        color: rgba(255, 107, 122, 0.7);
+        cursor: default;
+      }
+
+      .runpanel__rocket {
+        flex: none;
+        font-size: 18px;
+        line-height: 1;
+        color: var(--muted);
+        transition: color 0.3s ease, filter 0.3s ease;
+      }
+
+      /* Orbitron is otherwise the card's own headline face; the run's state
+         earns it, being the one thing here that keeps changing. */
+      .runpanel__value {
+        white-space: nowrap;
+        font-family: Orbitron, "Titillium Web", sans-serif;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--muted);
+        transition: color 0.3s ease;
+      }
+
+      /* Running: the rocket climbs, the label breathes, and a cyan sweep
+         crosses the bar — saying "working" without a progress bar the card
+         has no percentage to fill. */
+      .runpanel[data-tone="busy"] {
+        border-color: var(--cyan-dim);
+      }
+
+      .runpanel[data-tone="busy"] .runpanel__rocket {
+        color: var(--cyan);
+        filter: drop-shadow(0 0 8px rgba(34, 230, 245, 0.9));
+        animation: rocket-lift 2s ease-in-out infinite;
+      }
+
+      .runpanel[data-tone="busy"] .runpanel__value {
+        color: var(--cyan);
+        animation: status-glow 1.8s ease-in-out infinite;
+      }
+
+      .runpanel[data-tone="busy"] .runpanel__bar::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          rgba(34, 230, 245, 0.14),
+          transparent
+        );
+        animation: bar-sweep 2.4s linear infinite;
+        pointer-events: none;
+      }
+
+      .runpanel[data-tone="ok"] {
+        border-color: rgba(53, 224, 127, 0.45);
+      }
+
+      .runpanel[data-tone="ok"] .runpanel__rocket {
+        color: var(--ok);
+        filter: drop-shadow(0 0 8px rgba(53, 224, 127, 0.9));
+      }
+
+      .runpanel[data-tone="ok"] .runpanel__value {
+        color: var(--ok);
+        text-shadow: 0 0 14px rgba(53, 224, 127, 0.55);
+      }
+
+      .runpanel[data-tone="bad"] {
+        border-color: rgba(255, 107, 122, 0.45);
+      }
+
+      .runpanel[data-tone="bad"] .runpanel__rocket {
+        color: var(--danger);
+        filter: drop-shadow(0 0 8px rgba(255, 107, 122, 0.8));
+      }
+
+      .runpanel[data-tone="bad"] .runpanel__value {
+        color: var(--danger);
+        text-shadow: 0 0 14px rgba(255, 107, 122, 0.5);
+      }
+
+      /* One-shot on the way into a terminal state, so the outcome registers
+         even when the operator was reading the log rather than the bar. */
+      .runpanel--flash[data-tone="ok"] {
+        animation: flash-ok 0.6s ease-out;
+      }
+
+      .runpanel--flash[data-tone="bad"] {
+        animation: flash-bad 0.6s ease-out;
+      }
+
+      .runpanel--flash[data-tone="bad"] .runpanel__rocket {
+        animation: shake 0.4s ease-in-out;
+      }
+
+      @keyframes rocket-lift {
+        50% {
+          transform: translateY(-3px) rotate(-6deg);
+        }
+      }
+
+      @keyframes status-glow {
+        50% {
+          text-shadow: 0 0 16px rgba(34, 230, 245, 0.75);
+        }
+      }
+
+      @keyframes bar-sweep {
+        from {
+          transform: translateX(-100%);
+        }
+        to {
+          transform: translateX(100%);
+        }
+      }
+
+      @keyframes flash-ok {
+        from {
+          box-shadow: 0 0 0 0 rgba(53, 224, 127, 0.55);
+        }
+        to {
+          box-shadow: 0 0 0 14px rgba(53, 224, 127, 0);
+        }
+      }
+
+      @keyframes flash-bad {
+        from {
+          box-shadow: 0 0 0 0 rgba(255, 107, 122, 0.55);
+        }
+        to {
+          box-shadow: 0 0 0 14px rgba(255, 107, 122, 0);
+        }
+      }
+
+      @keyframes shake {
+        25% {
+          transform: translateX(-3px);
+        }
+        75% {
+          transform: translateX(3px);
+        }
+      }
+
+      /* Per-unit outcome of a finished run, one chip per status seen. Rides
+         at the far end of the panel bar, so it costs no height of its own. */
+      .chips {
+        flex: none;
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 6px;
+        /* Pushed to the bar's far end, and still to the right of its own line
+           when the bar has to wrap. */
+        margin-left: auto;
+      }
+
+      .chips[hidden] {
+        display: none;
+      }
+
+      .chip {
+        padding: 3px 9px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        font-size: 9px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .chip[data-status="ok"] {
+        border-color: rgba(53, 224, 127, 0.45);
+        color: var(--ok);
+      }
+
+      .chip[data-status="missing_files"] {
+        border-color: var(--cyan-dim);
+        color: var(--cyan);
+      }
+
+      .chip[data-status="error"],
+      .chip[data-status="not_cloned"] {
+        border-color: rgba(255, 107, 122, 0.45);
+        color: var(--danger);
+      }
+
+      /* The worker's own log, streamed line by line while the run is live —
+         the point of this card, so it gets the height. The panel around it
+         draws the frame and the fill. */
+      .console {
+        height: clamp(280px, 46vh, 460px);
+        overflow-y: auto;
+        padding: 10px 12px;
+        font-family: "SFMono-Regular", Menlo, Consolas, "Liberation Mono",
+          monospace;
+        font-size: 11.5px;
+        line-height: 1.6;
+        color: var(--ink);
+      }
+
+      /* On the run view the height comes from the fill chain instead: the log
+         is what is left after the bar and the actions, and the floor is only a
+         guard for viewports too short to give it anything. */
+      .shell--run .console {
+        height: auto;
+        flex: 1 1 auto;
+        min-height: 140px;
+      }
+
+      /* The console is the only thing on this card that gives up height; the
+         bar above it and the strip and controls below it keep theirs. */
+      .shell--run .runpanel__bar,
+      .shell--run #run-message,
+      .shell--run .actions {
+        flex: none;
+      }
+
+      .console:focus-visible {
+        outline: none;
+        box-shadow: inset 0 0 0 1px var(--cyan-dim);
+      }
+
+      /* Nothing streamed yet: centre the standing-by note rather than open
+         on an empty slab. */
+      .console--empty {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .console__idle {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        margin: 0;
+        font-size: 11px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .console__idle .lucide {
+        font-size: 15px;
+      }
+
+      .console__line {
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      /* The worker logs "%(asctime)s %(levelname)-8s %(message)s", so the
+         three parts can carry their own weight: the clock recedes, the level
+         colours the row, and the message reads at full contrast. */
+      .console__time {
+        color: var(--muted);
+      }
+
+      .console__level {
+        color: var(--muted);
+      }
+
+      .console__level[data-level="INFO"] {
+        color: var(--cyan);
+      }
+
+      .console__level[data-level="WARNING"] {
+        color: var(--warn);
+      }
+
+      .console__level[data-level="ERROR"],
+      .console__level[data-level="CRITICAL"] {
+        color: var(--danger);
+      }
+
+      /* A failed line stays findable when scrolling back through a long run. */
+      .console__line[data-level="ERROR"],
+      .console__line[data-level="CRITICAL"] {
+        margin: 0 -12px;
+        padding: 0 12px;
+        background-color: rgba(255, 107, 122, 0.08);
+      }
+
+      .units__empty {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        margin: 0;
+        padding: 22px 12px;
+        font-size: 11.5px;
+        text-align: center;
+        color: var(--muted);
+      }
+
+      /* ------------------------------------------ core system model card */
+
+      /* Widest card of all — three columns of panels around the ship — and
+         the only one that scrolls its own page rather than fitting a
+         viewport, since what the run produced is longer than any screen. */
+      .shell--model {
+        width: min(1180px, 100%);
+        align-self: stretch;
+        margin: 0 auto;
+      }
+
+      /* The only view that is a deck of cards rather than one card. Each
+         panel carries the frame itself, so a shell around them would just be
+         a border drawn around borders — the chrome comes off here rather
+         than out of the markup, which the other five views still need. */
+      .card[data-view="model"] {
+        width: 100%;
+        padding: 0;
+        border-color: transparent;
+        box-shadow: none;
+      }
+
+      .card[data-view="model"]::before,
+      .card[data-view="model"]::after,
+      .card[data-view="model"] .card__blur,
+      .card[data-view="model"] .card__corners {
+        display: none;
+      }
+
+      /* Two columns of two: what the model is on the left, what was read to
+         build it on the right, each pair a short panel over a list. */
+      .model__grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        align-items: stretch;
+        /* Wider than a plain gutter: the panels' corner brackets glow past
+           their own edges, and at 14px the neighbouring pairs ran together. */
+        gap: 22px;
+      }
+
+      /* The strip and the grid are held back until the file has been read,
+         and a display of their own outranks the hidden attribute. */
+      .model__grid[hidden],
+      .context[hidden] {
+        display: none;
+      }
+
+      .model__column {
+        display: flex;
+        flex-direction: column;
+        gap: 22px;
+        min-width: 0;
+        min-height: 0;
+      }
+
+      /* Sized by the viewport rather than by its content, the way the run
+         card is: the shell stretches and stops height-centring, so the two
+         lists share out whatever the header and the short panels leave and
+         the whole deck lands on one screen. */
+      .shell--model .card,
+      .shell--model .card__body,
+      .shell--model #view-model:not([hidden]) {
+        display: flex;
+        flex: 1 1 auto;
+        flex-direction: column;
+        min-height: 0;
+      }
+
+      /* The grid is the only thing that gives up height. Its single row has
+         to be bounded too — an auto row sizes to its content and overflows
+         the flex box it was just fitted into, taking the bottom panel of
+         each column off the screen. */
+      .shell--model .model__grid {
+        flex: 1 1 auto;
+        min-height: 0;
+        grid-template-rows: minmax(0, 1fr);
+      }
+
+      /* Everything above and below it keeps its own height: a flex item
+         shrinks by default, and the context strip clips its own text rather
+         than pushing back. */
+      .shell--model .context,
+      .shell--model .model__loading,
+      .shell--model #model-message {
+        flex: none;
+      }
+
+      /* The header rows are centred, which leaves the line's right end free:
+         the download is hung there, out of the deck's way and costing it no
+         height of its own. */
+      #view-model {
+        position: relative;
+      }
+
+      /* This card has no subtitle; the context strip stands in for one, so it
+         takes the subtitle's exact box — 22px above, 32px below — and the
+         header lands where every other card's does. */
+      #model-context {
+        margin: 22px 0 32px;
+      }
+
+      .model__download {
+        position: absolute;
+        /* Centred on the strip it shares the line with. */
+        top: 12px;
+        right: 0;
+        z-index: 2;
+        border-radius: 999px;
+      }
+
+      /* One panel per part of the file: a chrome bar naming it, a body
+         holding its rows. With no shell around the deck each panel is a card
+         in its own right, so it is built exactly as .card is — same border,
+         same frosted fill, same four brackets — at panel scale. */
+      .mpanel {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        /* Short panels keep the height their content asks for. */
+        flex: none;
+        min-height: 0;
+        box-sizing: border-box;
+        border: 2px solid rgba(34, 230, 245, 0.3);
+        border-radius: 14px;
+        box-shadow: inset 0 0 60px rgba(34, 230, 245, 0.06);
+      }
+
+      /* The lists share out whatever the fixed panels leave, in equal parts:
+         the inventory takes the rest of the left column, the log and the
+         validation errors take half each of the right, and the two columns
+         end level however long their lists are. Basis 0, not auto — a 26-row
+         log measured at its content height would claim the whole column and
+         squeeze its neighbour to nothing. */
+      .mpanel--grow {
+        flex: 1 1 0;
+      }
+
+      .mpanel__blur {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        border-radius: 12px;
+        z-index: 0;
+      }
+
+      .mpanel__blur::before {
+        content: "";
+        position: absolute;
+        inset: -24px;
+        background-image: url("{{ url_for('static', filename='bg.jpeg') }}");
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+        background-attachment: fixed;
+        filter: blur(3px);
+      }
+
+      /* Deeper than the card's own 0.42 tint, which was mixed for one panel
+         covering most of the page. These are small and scattered, so far
+         more of the background shows through around them — and the bright
+         hull in it puts row text on a light ground at 0.42. */
+      .mpanel__blur::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background-color: rgba(5, 22, 31, 0.82);
+      }
+
+      .mpanel__corners {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+
+      .mpanel::before,
+      .mpanel::after,
+      .mpanel__corners::before,
+      .mpanel__corners::after {
+        content: "";
+        position: absolute;
+        width: 22px;
+        height: 22px;
+        border: 3px solid var(--cyan);
+        z-index: 1;
+        filter: drop-shadow(0 0 3px rgba(34, 230, 245, 0.95))
+          drop-shadow(0 0 8px rgba(34, 230, 245, 0.7))
+          drop-shadow(0 0 16px rgba(34, 230, 245, 0.4));
+      }
+
+      /* The card's 62px top arms would run a third of the way down a panel
+         this size, so the pair is shortened rather than copied outright. */
+      .mpanel::before,
+      .mpanel::after {
+        height: 34px;
+      }
+
+      .mpanel::before {
+        top: -2px;
+        left: -2px;
+        border-right: 0;
+        border-bottom: 0;
+        border-top-left-radius: 14px;
+      }
+
+      .mpanel::after {
+        top: -2px;
+        right: -2px;
+        border-left: 0;
+        border-bottom: 0;
+        border-top-right-radius: 14px;
+      }
+
+      .mpanel__corners::before {
+        bottom: -2px;
+        left: -2px;
+        border-right: 0;
+        border-top: 0;
+        border-bottom-left-radius: 14px;
+      }
+
+      .mpanel__corners::after {
+        bottom: -2px;
+        right: -2px;
+        border-left: 0;
+        border-top: 0;
+        border-bottom-right-radius: 14px;
+      }
+
+      /* Above the blur layer, and rounded to the frame's inner edge — the
+         panel can no longer clip them itself, since the brackets sit outside
+         its box. */
+      .mpanel__bar {
+        position: relative;
+        z-index: 1;
+        flex: none;
+        border-radius: 12px 12px 0 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        box-sizing: border-box;
+        min-height: 34px;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--line);
+        background-color: rgba(4, 22, 31, 0.5);
+        font-family: Orbitron, "Titillium Web", sans-serif;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--cyan);
+      }
+
+      .mpanel__bar .lucide {
+        font-size: 13px;
+      }
+
+      /* How many rows the panel is showing, at the bar's far end. */
+      .mpanel__count {
+        margin-left: auto;
+        font-family: "Titillium Web", sans-serif;
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+
+      /* Long lists scroll inside their panel rather than stretching the
+         column they share with the others. */
+      .mpanel__body {
+        position: relative;
+        z-index: 1;
+        flex: 1 1 auto;
+        min-height: 0;
+        border-radius: 0 0 12px 12px;
+        overflow-y: auto;
+      }
+
+      /* What the file amounts to, as the card's headline numbers: the four
+         counts its own metadata carries. */
+      .scale {
+        position: relative;
+        z-index: 1;
+        flex: none;
+        border-radius: 0 0 12px 12px;
+        overflow: hidden;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1px;
+        background-color: var(--line);
+      }
+
+      .scale__cell {
+        padding: 12px;
+        background-color: rgba(2, 14, 20, 0.55);
+        text-align: center;
+      }
+
+      .scale__value {
+        display: block;
+        font-family: Orbitron, "Titillium Web", sans-serif;
+        font-size: 24px;
+        font-weight: 700;
+        line-height: 1.1;
+        color: var(--cyan);
+      }
+
+      .scale__label {
+        display: block;
+        margin-top: 4px;
+        font-size: 9px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      /* A record from the file: its name on the first line, whatever the
+         record is made of on the lines under it. */
+      .mrow {
+        padding: 9px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .mrow:last-child {
+        border-bottom: 0;
+      }
+
+      .mrow__head {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+      }
+
+      .mrow__name {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        font-size: 12.5px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .mrow__value {
+        flex: none;
+        font-size: 11px;
+        letter-spacing: 0.04em;
+        color: var(--cyan);
+      }
+
+      /* The record's own detail — QoS, hierarchy, an endpoint pair — set
+         small and muted under the name it belongs to. */
+      .mrow__detail {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 5px 8px;
+        margin-top: 6px;
+        font-size: 10.5px;
+        letter-spacing: 0.03em;
+        color: var(--muted);
+      }
+
+      .mrow__detail .chip {
+        font-size: 8.5px;
+      }
+
+      /* An acquisition status, as the dot in front of the row it grades —
+         the log's own colour key, straight from the file. */
+      .dot {
+        flex: none;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background-color: var(--muted);
+      }
+
+      .dot[data-level="ok"] {
+        background-color: var(--ok);
+        box-shadow: 0 0 6px rgba(53, 224, 127, 0.7);
+      }
+
+      .dot[data-level="missing_data"] {
+        background-color: var(--warn);
+        box-shadow: 0 0 6px rgba(255, 196, 107, 0.7);
+      }
+
+      .dot[data-level="error"] {
+        background-color: var(--danger);
+        box-shadow: 0 0 6px rgba(255, 107, 122, 0.7);
+      }
+
+      /* The acquisition statuses the file reports, alongside the run's own
+         unit outcomes already keyed above. */
+      .chip[data-status="OK"] {
+        border-color: rgba(53, 224, 127, 0.45);
+        color: var(--ok);
+      }
+
+      .chip[data-status="MISSING_DATA"] {
+        border-color: rgba(255, 196, 107, 0.45);
+        color: var(--warn);
+      }
+
+      .chip[data-status="ERROR"] {
+        border-color: rgba(255, 107, 122, 0.45);
+        color: var(--danger);
+      }
+
+      /* Loading the file, and any panel that has nothing to list. */
+      .model__loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        padding: 60px 0;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .model__loading[hidden] {
+        display: none;
+      }
+
+      /* Four cells is one too many for a narrow strip — the others ellipsise
+         down to nothing. The timestamp is the least load-bearing of them, and
+         dropping it lets the context itself be read. */
+      @media (max-width: 560px) {
+        #model-context .context__cell:last-child {
+          display: none;
+        }
+      }
+
+      /* One column under 860px: two columns of rows this narrow are
+         unreadable. Stacked, the deck is taller than any viewport, so it goes
+         back to sizing by content and letting the page scroll rather than
+         crushing four panels onto one screen — and the download rejoins the
+         flow, since there is no longer a margin to hang it in. */
+      @media (max-width: 860px) {
+        .model__grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .shell--model .model__grid,
+        .mpanel--grow {
+          flex: none;
+        }
+
+        .shell--model .model__grid {
+          grid-template-rows: none;
+        }
+
+        .mpanel__body {
+          max-height: 320px;
+        }
+
+        .model__download {
+          position: static;
+          margin: 0 auto 22px;
+        }
+      }
+
+      /* Who is signed in — a right-aligned row above the title, so it
+         never crosses the corner brackets or the centred heading. */
+      /* Who is signed in. */
+      .sessionbar {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        font-size: 15.5px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .sessionbar[hidden] {
+        display: none;
+      }
+
+      .sessionbar > .lucide {
+        flex: none;
+        font-size: 21px;
+        color: var(--cyan);
+        opacity: 0.85;
+      }
+
+      .sessionbar__user {
+        max-width: 60%;
+        overflow: hidden;
+        color: var(--ink);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .sessionbar__divider {
+        flex: none;
+        width: 1px;
+        height: 21px;
+        background-color: var(--line);
+      }
+
+      .linkbtn {
+        flex: none;
+        display: flex;
+        align-items: center;
+        padding: 2px 4px;
+        border: 0;
+        border-radius: 999px;
+        background: transparent;
+        color: var(--muted);
+        font: inherit;
+        font-size: 22px;
+        line-height: 1;
+        cursor: pointer;
+        transition: color 0.2s;
+      }
+
+      .linkbtn:hover,
+      .linkbtn:focus-visible {
+        color: var(--cyan);
+      }
+
+      .hint {
+        margin: 2px 0 0;
+        font-size: 10.5px;
+        letter-spacing: 0.04em;
+        text-align: center;
+        color: var(--muted);
+      }
+
+      .boot {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        padding: 6px 0 2px;
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .card,
+        .message,
+        .spinner,
+        .modal__panel,
+        .runpanel,
+        .runpanel__rocket,
+        .runpanel__value,
+        .runpanel__bar::after {
+          animation: none;
+          transition: none;
+        }
+
+        .submit::before,
+        .submit__arrow,
+        .source__tile {
+          transition: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="sessionbar" id="sessionbar" hidden>
+      <i class="lucide lucide-circle-user"></i>
+      <span class="sessionbar__user" id="sessionbar-user"></span>
+      <span class="sessionbar__divider"></span>
+      <button
+        type="button"
+        class="linkbtn"
+        data-signout
+        title="Sign out"
+        aria-label="Sign out"
+      >
+        <i class="lucide lucide-log-out"></i>
+      </button>
+    </div>
+
+    <div class="shell" id="shell">
+      <ol class="stepper" id="stepper" hidden>
+        <li class="stepper__item" id="stepper-sources" data-state="todo">
+          <button type="button" class="stepper__button" data-stage="sources">
+            <span class="stepper__mark">
+              <i class="lucide lucide-check"></i>
+              <span class="stepper__num">1</span>
+            </span>
+            <span class="stepper__name">Sources</span>
           </button>
-          {% endif %}
-        </div>
-        {% if show_logout %}
-        <div class="d-flex align-items-center gap-1">
-          <span class="topbar-username text-uppercase"></span>
-          <button type="button" class="card-icon-btn logout-corner-btn" aria-label="Logout" title="Logout">
-            <i class="bi bi-box-arrow-right"></i>
+        </li>
+        <li class="stepper__item" id="stepper-select" data-state="todo">
+          <button type="button" class="stepper__button" data-stage="select">
+            <span class="stepper__mark">
+              <i class="lucide lucide-check"></i>
+              <span class="stepper__num">2</span>
+            </span>
+            <span class="stepper__name">Context</span>
           </button>
-        </div>
-        {% endif %}
-      </div>
-      {% endif %}
+        </li>
+        <li class="stepper__item" id="stepper-inventory" data-state="todo">
+          <button type="button" class="stepper__button" data-stage="inventory">
+            <span class="stepper__mark">
+              <i class="lucide lucide-check"></i>
+              <span class="stepper__num">3</span>
+            </span>
+            <span class="stepper__name">Inventory</span>
+          </button>
+        </li>
+        <li class="stepper__item" id="stepper-run" data-state="todo">
+          <button type="button" class="stepper__button" data-stage="run">
+            <span class="stepper__mark">
+              <i class="lucide lucide-check"></i>
+              <span class="stepper__num">4</span>
+            </span>
+            <span class="stepper__name">Produce</span>
+          </button>
+        </li>
+        <li class="stepper__item" id="stepper-model" data-state="todo">
+          <button type="button" class="stepper__button" data-stage="model">
+            <span class="stepper__mark">
+              <i class="lucide lucide-check"></i>
+              <span class="stepper__num">5</span>
+            </span>
+            <span class="stepper__name">Model</span>
+          </button>
+        </li>
+      </ol>
 
-      <div class="login-card__content position-relative">
-        <div class="d-flex flex-column align-items-center text-center mb-4">
-          {% if icon %}
-          <i class="bi bi-{{ icon }} login-icon login-icon--bi mb-3" aria-hidden="true"></i>
-          {% else %}
-          <img src="{{ url_for('static', filename='logo.png') }}" alt=""
-               class="login-icon object-fit-contain mb-3">
-          {% endif %}
-          <p class="login-title text-white fw-bold text-uppercase mt-1 mb-2">{{ title }}</p>
-          {% if subtitle %}<p class="login-subtitle text-uppercase mb-0">{{ subtitle }}</p>{% endif %}
-        </div>
+      <main class="card" id="card">
+        <div class="card__blur"></div>
+        <div class="card__corners"></div>
 
-        {{ caller() }}
-      </div>
-    </{{ tag }}>
-    {% endmacro %}
+        <div class="card__body">
+          <h1 class="title" id="title">Digital System Model</h1>
+          <img
+            class="logo"
+            id="logo"
+            src="{{ url_for('static', filename='logo.png') }}"
+            alt=""
+            width="171"
+            height="192"
+            hidden
+          />
+          <i class="lucide lucide-database brand-icon" id="brand-icon" hidden></i>
+          <p class="subtitle" id="subtitle">Secure Access</p>
 
-    <div class="position-absolute top-0 start-0 w-100 h-100 z-3 d-flex align-items-center justify-content-center px-3 px-sm-5 pe-none">
+          <!-- Boot: held until GET /api/session says which step we resume at. -->
+          <section class="view" id="view-boot">
+            <p class="boot"><span class="spinner"></span>Restoring session</p>
+          </section>
 
-      {% call card('loginCard', 'Digital System Model', 'Secure Access', tag='form', attrs='autocomplete="off"') %}
-        <div class="login-field position-relative mb-3">
-          <i class="bi bi-person login-field-icon pe-none position-absolute top-50 translate-middle-y d-flex align-items-center justify-content-center"></i>
-          <input type="text" name="username" required aria-label="Username" placeholder="USERNAME"
-                 class="form-control w-100 rounded-3 outline-none">
-        </div>
+          <section class="view" id="view-login" hidden>
+            <form id="login-form" novalidate>
+              <label class="field">
+                <i class="lucide lucide-user"></i>
+                <input
+                  id="username"
+                  name="username"
+                  type="text"
+                  placeholder="USERNAME"
+                  autocomplete="username"
+                  aria-describedby="login-message"
+                  autocapitalize="none"
+                  spellcheck="false"
+                  required
+                />
+              </label>
 
-        <div class="login-field position-relative mb-4">
-          <i class="bi bi-lock login-field-icon pe-none position-absolute top-50 translate-middle-y d-flex align-items-center justify-content-center"></i>
-          <input type="password" name="password" required aria-label="Password" placeholder="PASSWORD"
-                 class="form-control w-100 rounded-3 outline-none">
-        </div>
+              <label class="field">
+                <i class="lucide lucide-key"></i>
+                <input
+                  id="password"
+                  name="password"
+                  type="password"
+                  placeholder="PASSWORD"
+                  autocomplete="current-password"
+                  aria-describedby="login-message"
+                  required
+                />
+                <button
+                  type="button"
+                  class="reveal"
+                  data-reveal="password"
+                  aria-label="Show password"
+                >
+                  <i class="lucide lucide-eye-off"></i>
+                </button>
+              </label>
 
-        <div id="loginError" class="login-error mb-3 d-none" role="alert">
-          <i class="bi bi-exclamation-triangle-fill login-error__icon" aria-hidden="true"></i>
-          <span class="login-error__text"></span>
-        </div>
+              <p class="message" id="login-message" role="alert"></p>
 
-        <button type="submit" id="loginSubmitBtn" class="login-btn btn w-100 rounded-3 py-2 fw-semibold">
-          <span class="d-block text-uppercase fs-6 mb-1">Login</span>
-          <span class="login-btn-sub d-block text-uppercase fw-medium">Access Digital Twin</span>
-        </button>
-      {% endcall %}
+              <div class="actions">
+                <button type="submit" class="submit" id="login-submit">
+                  <span class="submit__label">Authenticate</span
+                  ><i class="lucide lucide-arrow-right submit__arrow"></i>
+                </button>
+              </div>
+            </form>
+          </section>
 
-      {% call card('configDbCard', 'Config Management DB', 'Enter Your Credentials', tag='form', hidden=True, attrs='autocomplete="off"', show_logout=True, icon='database') %}
-        <div class="login-field position-relative mb-2">
-          <i class="bi bi-hdd-network login-field-icon pe-none position-absolute top-50 translate-middle-y d-flex align-items-center justify-content-center"></i>
-          <input type="text" name="configMgmtAddress" required aria-label="Config management DB address" placeholder="ADDRESS"
-                 class="form-control w-100 rounded-3 outline-none">
-        </div>
-        <div class="login-field position-relative mb-2">
-          <i class="bi bi-person login-field-icon pe-none position-absolute top-50 translate-middle-y d-flex align-items-center justify-content-center"></i>
-          <input type="text" name="configMgmtUsername" required aria-label="Config management DB username" placeholder="USERNAME"
-                 class="form-control w-100 rounded-3 outline-none">
-        </div>
-        <div class="login-field position-relative mb-4">
-          <i class="bi bi-lock login-field-icon pe-none position-absolute top-50 translate-middle-y d-flex align-items-center justify-content-center"></i>
-          <input type="password" name="configMgmtPassword" required aria-label="Config management DB password" placeholder="PASSWORD"
-                 class="form-control w-100 rounded-3 outline-none">
-        </div>
+          <!-- Data sources: one tile per source this session must hold a
+               connection to. Each tile opens the connection modal; the line
+               under it says whether the server currently holds that
+               connection. Credentials are the source's own, not the sign-in
+               ones, and are asked once — the connection then lives on the
+               server for the rest of the session. -->
+          <section class="view" id="view-sources" hidden>
+            <div class="sources" id="sources-grid"></div>
 
-        <div id="configDbError" class="login-error mb-3 d-none" role="alert">
-          <i class="bi bi-exclamation-triangle-fill login-error__icon" aria-hidden="true"></i>
-          <span class="login-error__text"></span>
-        </div>
+            <p class="message" id="sources-message" role="alert"></p>
 
-        <button type="submit" id="configDbSubmitBtn" class="login-btn btn w-100 rounded-3 py-2 fw-semibold">
-          <span class="d-block text-uppercase fs-6 mb-1">Connect</span>
-        </button>
-      {% endcall %}
-
-      {% call card('selectionCard', 'Select Project', 'Pick platform and version', tag='form', hidden=True, show_logout=True, show_back=True, icon='diagram-3') %}
-        <div class="mb-2">
-          <select name="projectId" required aria-label="Project" class="login-select form-select w-100 rounded-3"></select>
-        </div>
-        <div class="mb-2">
-          <select name="platformId" required aria-label="Platform" class="login-select form-select w-100 rounded-3" disabled></select>
-        </div>
-        <div class="mb-4">
-          <select name="versionId" required aria-label="Version" class="login-select form-select w-100 rounded-3" disabled></select>
-        </div>
-
-        <div id="selectionError" class="login-error mb-3 d-none" role="alert">
-          <i class="bi bi-exclamation-triangle-fill login-error__icon" aria-hidden="true"></i>
-          <span class="login-error__text"></span>
-        </div>
-
-        <button type="submit" id="selectionSubmitBtn" class="login-btn btn w-100 rounded-3 py-2 fw-semibold">
-          <span class="d-block text-uppercase fs-6 mb-1">Next</span>
-        </button>
-      {% endcall %}
-
-      {% call card('sourceRepoCard', 'Source Code Repo', 'Enter Your Credentials', tag='form', hidden=True, attrs='autocomplete="off"', show_logout=True, show_back=True, icon='git') %}
-        <div class="login-field position-relative mb-2">
-          <i class="bi bi-hdd-network login-field-icon pe-none position-absolute top-50 translate-middle-y d-flex align-items-center justify-content-center"></i>
-          <input type="text" name="sourceRepoAddress" required aria-label="Source code repo address" placeholder="ADDRESS"
-                 class="form-control w-100 rounded-3 outline-none">
-        </div>
-        <div class="login-field position-relative mb-2">
-          <i class="bi bi-person login-field-icon pe-none position-absolute top-50 translate-middle-y d-flex align-items-center justify-content-center"></i>
-          <input type="text" name="sourceRepoUsername" required aria-label="Source code repo username" placeholder="USERNAME"
-                 class="form-control w-100 rounded-3 outline-none">
-        </div>
-        <div class="login-field position-relative mb-4">
-          <i class="bi bi-lock login-field-icon pe-none position-absolute top-50 translate-middle-y d-flex align-items-center justify-content-center"></i>
-          <input type="password" name="sourceRepoPassword" required aria-label="Source code repo password" placeholder="PASSWORD"
-                 class="form-control w-100 rounded-3 outline-none">
-        </div>
-
-        <div id="sourceRepoError" class="login-error mb-3 d-none" role="alert">
-          <i class="bi bi-exclamation-triangle-fill login-error__icon" aria-hidden="true"></i>
-          <span class="login-error__text"></span>
-        </div>
-
-        <button type="submit" id="sourceRepoSubmitBtn" class="login-btn btn w-100 rounded-3 py-2 fw-semibold">
-          <span class="d-block text-uppercase fs-6 mb-1">Connect</span>
-        </button>
-      {% endcall %}
-
-      {% call card('runCard', 'Run Production', 'Clone Selection Units and Generate Model Setup Data', hidden=True, show_logout=True, show_back=True, icon='rocket-takeoff') %}
-        <div class="text-center">
-          <p class="text-white small mb-3"><span id="runSelectionSummary" class="fw-bold"></span></p>
-
-          <div class="text-start mb-3">
-            <div class="d-flex align-items-center justify-content-between mb-1">
-              <span class="login-subtitle text-uppercase">Selection Units</span>
-              <span id="runUnitsCount" class="run-count d-none"></span>
+            <div class="actions">
+              <button type="button" class="submit" id="sources-submit" disabled>
+                <span class="submit__label">Continue</span
+                ><i class="lucide lucide-arrow-right submit__arrow"></i>
+              </button>
             </div>
-            <div id="runUnitsList" class="run-units">
-              <ul id="runUnits" aria-label="Software units to clone"></ul>
-              <p id="runUnitsPlaceholder" class="run-units__placeholder d-none"></p>
-              <div id="runUnitsError" class="login-error d-none" role="alert">
-                <i class="bi bi-exclamation-triangle-fill login-error__icon" aria-hidden="true"></i>
-                <span class="login-error__text"></span>
+          </section>
+
+          <section class="view" id="view-select" hidden>
+            <form id="select-form" novalidate>
+              <div class="picker" id="picker-project">
+                <label class="label" for="project">Project</label>
+                <div class="picker__control">
+                  <select id="project"></select>
+                  <i class="lucide lucide-chevron-down"></i>
+                </div>
+              </div>
+
+              <div class="picker picker--disabled" id="picker-platform">
+                <label class="label" for="platform">Platform</label>
+                <div class="picker__control">
+                  <select id="platform" disabled></select>
+                  <i class="lucide lucide-chevron-down"></i>
+                </div>
+              </div>
+
+              <div class="picker picker--disabled" id="picker-version">
+                <label class="label" for="version">System version</label>
+                <div class="picker__control">
+                  <select id="version" disabled></select>
+                  <i class="lucide lucide-chevron-down"></i>
+                </div>
+              </div>
+
+              <p class="message" id="select-message" role="alert"></p>
+
+              <div class="actions">
+                <button type="submit" class="submit" id="select-submit" disabled>
+                  <span class="submit__label">Confirm context</span
+                  ><i class="lucide lucide-arrow-right submit__arrow"></i>
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <!-- Software Unit Version Inventory (SRS DSM-MSD req 10): the
+               units that run in the confirmed project/platform/version, and
+               the version of each, read from the configuration management
+               database. -->
+          <section class="view" id="view-inventory" hidden>
+            <!-- The keys stay in the markup for assistive tech, which reads
+                 "Project skywatch"; on screen the three cells and their
+                 order carry the same meaning in a single line. -->
+            <div class="context">
+              <div class="context__cell" title="Project">
+                <span class="context__key">Project</span>
+                <span class="context__value" id="context-project"></span>
+              </div>
+              <div class="context__cell" title="Platform">
+                <span class="context__key">Platform</span>
+                <span class="context__value" id="context-platform"></span>
+              </div>
+              <div class="context__cell" title="System version">
+                <span class="context__key">Version</span>
+                <span class="context__value" id="context-version"></span
+                ><span class="context__flag" id="context-current" hidden>
+                  &middot; Current</span
+                >
               </div>
             </div>
-          </div>
 
-          <div id="runOutput" class="run-output d-none" aria-live="polite"></div>
+            <!-- Filter and list share one box: the filter belongs to the
+                 list it narrows, and the count belongs to both. -->
+            <div class="units">
+              <label class="units__search">
+                <i class="lucide lucide-search"></i>
+                <input
+                  id="unit-filter"
+                  type="text"
+                  placeholder="FILTER UNITS"
+                  aria-label="Filter software units"
+                  aria-controls="unit-list"
+                  autocomplete="off"
+                  autocapitalize="none"
+                  spellcheck="false"
+                />
+                <span class="units__count" id="unit-count"></span>
+              </label>
 
-          <p id="runStatus" class="login-subtitle text-uppercase mb-3"></p>
+              <div class="units__list" id="unit-list"></div>
 
-          <div id="runResult" class="text-start small text-white mb-3 d-none"></div>
+              <!-- The candidate version being evaluated for installation into
+                   the target environment (SRS DSM-MSD req 11), as the box's
+                   last row: it rewrites one row of the list above, so it
+                   belongs inside the same frame rather than floating under
+                   it. A run evaluates at most one unit, so it reads as one
+                   line — "evaluate <unit> at <version>" — rather than a
+                   block of stacked pickers. Leaving the unit unset runs the
+                   versions this system version defines. -->
+              <div class="units__candidate">
+                <span class="units__candidate-key">Evaluate</span>
+                <div class="picker picker--inline">
+                  <div class="picker__control">
+                    <select
+                      id="candidate-unit"
+                      aria-label="Software unit to evaluate"
+                      disabled
+                    ></select>
+                    <i class="lucide lucide-chevron-down"></i>
+                  </div>
+                </div>
+                <span class="units__candidate-key">at</span>
+                <div
+                  class="picker picker--inline picker--disabled"
+                  id="picker-candidate-version"
+                >
+                  <div class="picker__control">
+                    <select
+                      id="candidate-version"
+                      aria-label="Candidate version"
+                      disabled
+                    ></select>
+                    <i class="lucide lucide-chevron-down"></i>
+                  </div>
+                </div>
+              </div>
+            </div>
 
-          <div class="d-flex gap-2">
-            <button type="button" id="runCancelBtn" class="cancel-btn btn rounded-3 py-2 fw-semibold d-none">
-              <span class="d-block text-uppercase fs-6">Cancel</span>
-            </button>
-            <a href="#" id="runDownloadBtn" class="download-btn btn rounded-3 py-2 fw-semibold d-none">
-              <span class="d-block text-uppercase fs-6">Download</span>
+            <p class="candidate__note" id="candidate-note" role="status"></p>
+            <p class="message" id="inventory-message" role="alert"></p>
+
+            <div class="actions">
+              <button type="button" class="submit" id="inventory-next">
+                <span class="submit__label">Produce data</span
+                ><i class="lucide lucide-arrow-right submit__arrow"></i>
+              </button>
+            </div>
+          </section>
+
+          <!-- The Model Setup Data files already produced for the selected
+               project, platform and system version, and the choice of which
+               to use (SRS DSM-VAE req 5). The Produce stage opens here rather
+               than on the console: an existing file is offered before a run
+               is spent making another. Every producer's files, not just this
+               user's — a file belongs to the selection it describes, and each
+               row names who produced it. -->
+          <section class="view" id="view-files" hidden>
+            <!-- Hidden until the list has actually been read, so the card
+                 never claims there are none while the request is still out. -->
+            <div class="files" id="run-files-panel" hidden>
+              <span class="files__label">Previously produced</span>
+              <ul class="files__list" id="run-files"></ul>
+              <p class="files__empty" id="run-files-empty" hidden>
+                No Model Setup Data produced for this context yet.
+              </p>
+            </div>
+
+            <p class="message" id="files-message" role="alert"></p>
+
+            <!-- Pressing this is the decision to produce, so it submits and
+                 hands over to the console rather than opening an idle card
+                 with a second button meaning the same thing. -->
+            <div class="actions">
+              <button type="button" class="submit" id="files-produce">
+                <span class="submit__label">Produce new</span
+                ><i class="lucide lucide-arrow-right submit__arrow"></i>
+              </button>
+            </div>
+          </section>
+
+          <!-- Model Setup Data production (SRS DSM-VAE req 6, 8): follow the
+               worker's own output and the task's state over one stream until
+               it ends. Reached from the files card, which is what starts the
+               run; this card is where it is watched. -->
+          <section class="view" id="view-run" hidden>
+            <!-- State, tally and log in one panel: the bar is chrome for the
+                 console under it, so neither the status nor the result chips
+                 take height the log could have had. -->
+            <div class="runpanel" id="run-status" data-tone="idle">
+              <div class="runpanel__bar">
+                <i class="lucide lucide-rocket runpanel__rocket"></i>
+                <span class="runpanel__value" id="run-status-value"
+                  >Not started</span
+                >
+                <div class="chips" id="run-summary" hidden></div>
+                <!-- Stop rides with the state it stops rather than in the
+                     action row below: it is the only control showing while a
+                     run is live, and alone down there it was a button in an
+                     otherwise empty row. Never on screen at the same time as
+                     the chips, which only exist once a run has finished. -->
+                <button
+                  type="button"
+                  class="submit submit--ghost submit--compact runpanel__stop"
+                  id="run-cancel"
+                  hidden
+                >
+                  <i class="lucide lucide-circle-x"></i
+                  ><span class="submit__label">Cancel</span>
+                </button>
+              </div>
+
+              <div
+                class="console console--empty"
+                id="console"
+                aria-live="polite"
+                tabindex="0"
+              >
+                <p class="console__idle">
+                  <i class="lucide lucide-rocket"></i>Awaiting launch
+                </p>
+              </div>
+            </div>
+
+            <p class="message" id="run-message" role="alert"></p>
+
+            <!-- One bar at a time: Start until a run produces a model, then
+                 Core System Model in its place. -->
+            <div class="actions">
+              <button type="button" class="submit" id="run-start">
+                <span class="submit__label">Start production</span
+                ><i class="lucide lucide-arrow-right submit__arrow"></i>
+              </button>
+              <!-- What a finished run leads to: the model itself, not a file
+                   to open elsewhere. Downloading it is one of the things the
+                   Core System Model card offers. -->
+              <button
+                type="button"
+                class="submit submit--ok"
+                id="run-model"
+                hidden
+              >
+                <span class="submit__label">Core System Model</span
+                ><i class="lucide lucide-arrow-right submit__arrow"></i>
+              </button>
+              <!-- Back to the produced files, under whichever action leads
+                   forward. Always available, including while a run is still
+                   going: leaving the console does not stop the run, and the
+                   stream is re-attached on the way back in. -->
+              <button
+                type="button"
+                class="submit submit--ghost submit--compact"
+                id="run-back"
+              >
+                <i class="lucide lucide-arrow-left"></i
+                ><span class="submit__label">Produced files</span>
+              </button>
+            </div>
+          </section>
+
+          <!-- What the run produced, read back: the Model Setup Data file
+               itself, one panel per part of it. The card fetches the file
+               inline from the msd-files route and renders it; nothing here is
+               derived, every value is a field of the file. -->
+          <section class="view" id="view-model" hidden>
+            <!-- The context the file was generated for, and when — the same
+                 slash-path the inventory card carries, read from the file
+                 rather than from the session. -->
+            <div class="context" id="model-context" hidden>
+              <div class="context__cell" title="Project">
+                <span class="context__key">Project</span>
+                <span class="context__value" id="model-project"></span>
+              </div>
+              <div class="context__cell" title="Platform">
+                <span class="context__key">Platform</span>
+                <span class="context__value" id="model-platform"></span>
+              </div>
+              <div class="context__cell" title="System version">
+                <span class="context__key">Version</span>
+                <span class="context__value" id="model-version"></span
+                ><span class="context__flag" id="model-current" hidden>
+                  &middot; Current</span
+                >
+              </div>
+              <div class="context__cell" title="Generated">
+                <span class="context__key">Generated</span>
+                <span class="context__value" id="model-generated"></span>
+              </div>
+            </div>
+
+            <!-- The file itself, offered in the header's right margin rather
+                 than as a bar across the foot: it belongs with the line that
+                 names the model, and costs the deck below no height. -->
+            <a
+              class="submit submit--compact model__download"
+              id="model-download"
+              href="#"
+              download
+            >
+              <i class="lucide lucide-download"></i
+              ><span class="submit__label">JSON</span>
             </a>
-            <button type="button" id="runSubmitBtn" class="login-btn btn w-100 rounded-3 py-2 fw-semibold">
-              <span class="d-block text-uppercase fs-6 mb-1">Run</span>
+
+            <p class="model__loading" id="model-loading" hidden>
+              <span class="spinner"></span>Reading model
+            </p>
+
+            <div class="model__grid" id="model-grid" hidden>
+              <div class="model__column">
+                <div class="mpanel">
+                  <div class="mpanel__blur"></div>
+                  <div class="mpanel__corners"></div>
+                  <div class="mpanel__bar">
+                    <i class="lucide lucide-box-select"></i>Model Scale
+                  </div>
+                  <div class="scale" id="model-scale"></div>
+                </div>
+
+                <div class="mpanel mpanel--grow">
+                  <div class="mpanel__blur"></div>
+                  <div class="mpanel__corners"></div>
+                  <div class="mpanel__bar">
+                    <i class="lucide lucide-package"></i>Software Unit Inventory
+                    <span class="mpanel__count" id="model-unit-count"></span>
+                  </div>
+                  <div class="mpanel__body" id="model-units"></div>
+                </div>
+              </div>
+
+              <div class="model__column">
+                <div class="mpanel mpanel--grow">
+                  <div class="mpanel__blur"></div>
+                  <div class="mpanel__corners"></div>
+                  <div class="mpanel__bar">
+                    <i class="lucide lucide-list-checks"></i>Acquisition Log
+                    <span class="mpanel__count" id="model-log-count"></span>
+                  </div>
+                  <div class="mpanel__body" id="model-log"></div>
+                </div>
+
+                <div class="mpanel mpanel--grow">
+                  <div class="mpanel__blur"></div>
+                  <div class="mpanel__corners"></div>
+                  <div class="mpanel__bar">
+                    <i class="lucide lucide-triangle-alert"></i>Validation Errors
+                    <span class="mpanel__count" id="model-error-count"></span>
+                  </div>
+                  <div class="mpanel__body" id="model-errors"></div>
+                </div>
+              </div>
+            </div>
+
+            <p class="message" id="model-message" role="alert"></p>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <!-- Connection details for whichever source tile was clicked. One panel
+         serves every source: the header and the endpoint come from the
+         source, the three fields are the same for all of them. -->
+    <div class="modal" id="modal" hidden>
+      <div class="modal__scrim" data-modal-close></div>
+      <div
+        class="modal__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modal-title"
+      >
+        <button
+          type="button"
+          class="linkbtn modal__close"
+          data-modal-close
+          title="Close"
+          aria-label="Close"
+        >
+          <i class="lucide lucide-x"></i>
+        </button>
+
+        <i class="lucide modal__icon" id="modal-icon"></i>
+        <h1 class="title modal__title" id="modal-title"></h1>
+        <p class="subtitle">Connection Details</p>
+
+        <form id="modal-form" novalidate>
+          <label class="field">
+            <i class="lucide lucide-server"></i>
+            <input
+              id="source-address"
+              type="text"
+              placeholder="CONNECTION ADDRESS"
+              aria-label="Connection address"
+              aria-describedby="modal-message"
+              autocapitalize="none"
+              spellcheck="false"
+            />
+          </label>
+
+          <label class="field">
+            <i class="lucide lucide-user"></i>
+            <input
+              id="source-username"
+              type="text"
+              placeholder="USERNAME"
+              aria-label="Source username"
+              aria-describedby="modal-message"
+              autocomplete="off"
+              autocapitalize="none"
+              spellcheck="false"
+            />
+          </label>
+
+          <label class="field">
+            <i class="lucide lucide-key"></i>
+            <input
+              id="source-password"
+              type="password"
+              placeholder="PASSWORD"
+              aria-label="Source password"
+              aria-describedby="modal-message"
+              autocomplete="off"
+            />
+            <button
+              type="button"
+              class="reveal"
+              data-reveal="source-password"
+              aria-label="Show password"
+            >
+              <i class="lucide lucide-eye-off"></i>
+            </button>
+          </label>
+
+          <p class="hint">Asked once &mdash; the connection stays open for this session.</p>
+
+          <p class="message" id="modal-message" role="alert"></p>
+
+          <div class="actions">
+            <button type="submit" class="submit" id="modal-submit">
+              <span class="submit__label">Connect</span
+              ><i class="lucide lucide-arrow-right submit__arrow"></i>
             </button>
           </div>
-        </div>
-      {% endcall %}
-
+        </form>
+      </div>
     </div>
-  </main>
 
-  <script>
-    document.addEventListener('DOMContentLoaded', () => {
-      const loginCard = document.getElementById('loginCard');
-      const loginError = document.getElementById('loginError');
-      const loginSubmitBtn = document.getElementById('loginSubmitBtn');
-      const configDbCard = document.getElementById('configDbCard');
-      const configDbError = document.getElementById('configDbError');
-      const configDbSubmitBtn = document.getElementById('configDbSubmitBtn');
-      const selectionCard = document.getElementById('selectionCard');
-      const selectionError = document.getElementById('selectionError');
-      const selectionSubmitBtn = document.getElementById('selectionSubmitBtn');
-      const projectSelect = selectionCard.elements['projectId'];
-      const platformSelect = selectionCard.elements['platformId'];
-      const versionSelect = selectionCard.elements['versionId'];
-      const sourceRepoCard = document.getElementById('sourceRepoCard');
-      const sourceRepoError = document.getElementById('sourceRepoError');
-      const sourceRepoSubmitBtn = document.getElementById('sourceRepoSubmitBtn');
-      const runCard = document.getElementById('runCard');
-      const runSelectionSummary = document.getElementById('runSelectionSummary');
-      const runStatus = document.getElementById('runStatus');
-      const runResult = document.getElementById('runResult');
-      const runSubmitBtn = document.getElementById('runSubmitBtn');
-      const runCancelBtn = document.getElementById('runCancelBtn');
-      const runDownloadBtn = document.getElementById('runDownloadBtn');
-      const runOutput = document.getElementById('runOutput');
-      const runUnits = document.getElementById('runUnits');
-      const runUnitsCount = document.getElementById('runUnitsCount');
-      const runUnitsPlaceholder = document.getElementById('runUnitsPlaceholder');
-      const runUnitsError = document.getElementById('runUnitsError');
-      const passwordInput = loginCard.elements['password'];
-
-      let sourceRepoDefaultAddress = ''; // carried from login through the config-db step
-      let currentTaskId = null;         // the run currently being tracked (null when idle)
-      let outputSource = null;         // EventSource streaming the task's output lines and status
-      let runOutputLineCount = 0;      // lines rendered into the console
-      let runUnitData = [];              // pre-run inventory preview for the selection
-      let unitRows = new Map();          // unit_name -> list row element
-      let runUnitsToken = 0;             // invalidates superseded units-list loads
-
-      function crossfade(hideEl, showEl) {
-        hideEl.classList.add('d-none');
-        showEl.classList.remove('d-none');
-      }
-
-      const wizardCards = [loginCard, configDbCard, selectionCard, sourceRepoCard, runCard];
-
-      function showOnlyCard(el) {
-        wizardCards.forEach((card) => card.classList.toggle('d-none', card !== el));
-      }
-
-      function showError(message) {
-        loginError.querySelector('.login-error__text').textContent = message;
-        loginError.classList.remove('d-none');
-      }
-
-      function showConfigDbError(message) {
-        configDbError.querySelector('.login-error__text').textContent = message;
-        configDbError.classList.remove('d-none');
-      }
-
-      function showSourceRepoError(message) {
-        sourceRepoError.querySelector('.login-error__text').textContent = message;
-        sourceRepoError.classList.remove('d-none');
-      }
-
-      function showSelectionError(message) {
-        selectionError.querySelector('.login-error__text').textContent = message;
-        selectionError.classList.remove('d-none');
-      }
-
-      function resetSelect(select, placeholder, disabled) {
-        select.innerHTML = '';
-        const opt = document.createElement('option');
-        opt.value = '';
-        opt.textContent = placeholder;
-        opt.disabled = true;
-        opt.selected = true;
-        select.appendChild(opt);
-        select.disabled = disabled;
-      }
-
-      function populateSelect(select, items, valueKey, labelKey, effectiveKey) {
-        for (const item of items) {
-          const opt = document.createElement('option');
-          opt.value = item[valueKey];
-          opt.textContent = effectiveKey && item[effectiveKey] ? `${item[labelKey]} (current)` : item[labelKey];
-          select.appendChild(opt);
-        }
-        select.disabled = false;
-      }
-
-      const loadTokens = new WeakMap();
-
-      async function loadOptions(select, url, valueKey, labelKey, effectiveKey) {
-        const token = (loadTokens.get(select) || 0) + 1;
-        loadTokens.set(select, token);
-        try {
-          const res = await fetch(url, { credentials: 'same-origin' });
-          const body = await res.json().catch(() => ({}));
-          if (loadTokens.get(select) !== token) return 'error'; // superseded by a newer request
-          if (res.ok) {
-            const items = body.projects || body.platforms || body.versions || [];
-            populateSelect(select, items, valueKey, labelKey, effectiveKey);
-            return 'ok';
-          }
-          showSelectionError(body.error || 'Failed to load options');
-          return 'error';
-        } catch (err) {
-          if (loadTokens.get(select) !== token) return 'error'; // superseded by a newer request
-          showSelectionError('Unable to reach the server');
-          return 'error';
-        }
-      }
-
-      function loadProjects() {
-        resetSelect(projectSelect, 'PROJECT', false);
-        resetSelect(platformSelect, 'PLATFORM', true);
-        resetSelect(versionSelect, 'VERSION', true);
-        return loadOptions(projectSelect, '/api/projects', 'project_id', 'name');
-      }
-
-      function loadPlatforms(projectId) {
-        resetSelect(platformSelect, 'PLATFORM', true);
-        resetSelect(versionSelect, 'VERSION', true);
-        if (!projectId) return 'error';
-        return loadOptions(platformSelect, `/api/projects/${encodeURIComponent(projectId)}/platforms`, 'platform_id', 'name');
-      }
-
-      function loadVersions(projectId, platformId) {
-        resetSelect(versionSelect, 'VERSION', true);
-        if (!platformId) return 'error';
-        return loadOptions(
-          versionSelect,
-          `/api/projects/${encodeURIComponent(projectId)}/platforms/${encodeURIComponent(platformId)}/versions`,
-          'version_id', 'label', 'is_effective'
-        );
-      }
-
-      function selectOption(select, value) {
-        if (!value) return false;
-        for (const opt of select.options) {
-          if (opt.value === value) {
-            select.value = value;
-            return true;
-          }
-        }
-        return false;
-      }
-
-      // Re-fetch the options cascade against a persisted selection, leaving the
-      // selects populated with the saved values (so Back navigation shows the
-      // remembered selection). 'indeterminate' = a fetch failed (config DB
-      // unreachable — keep the selection); 'stale' = a successful fetch did not
-      // contain one of the saved ids.
-      async function resolveStoredSelection(selection) {
-        if (!selection || !selection.project_id || !selection.platform_id || !selection.version_id) {
-          return 'stale';
-        }
-        const projects = await loadProjects();
-        if (projects !== 'ok') return 'indeterminate';
-        if (!selectOption(projectSelect, selection.project_id)) return 'stale';
-
-        const platforms = await loadPlatforms(projectSelect.value);
-        if (platforms !== 'ok') return 'indeterminate';
-        if (!selectOption(platformSelect, selection.platform_id)) return 'stale';
-
-        const versions = await loadVersions(projectSelect.value, platformSelect.value);
-        if (versions !== 'ok') return 'indeterminate';
-        if (!selectOption(versionSelect, selection.version_id)) return 'stale';
-
-        return 'ok';
-      }
-
-      projectSelect.addEventListener('change', () => loadPlatforms(projectSelect.value));
-      platformSelect.addEventListener('change', () => loadVersions(projectSelect.value, platformSelect.value));
-
-      function setTopbarUsername(username) {
-        document.querySelectorAll('.topbar-username').forEach((el) => {
-          el.textContent = username;
-        });
-      }
-
-      function showConfigDbCard(defaults) {
-        configDbCard.elements['configMgmtAddress'].value = defaults.config_mgmt_db || '';
-        sourceRepoDefaultAddress = defaults.source_code_repo || '';
-        crossfade(loginCard, configDbCard);
-      }
-
-      function showSelectionCard() {
-        selectionError.classList.add('d-none');
-        loadProjects();
-        crossfade(configDbCard, selectionCard);
-      }
-
-      function showSourceRepoCard() {
-        sourceRepoCard.elements['sourceRepoAddress'].value = sourceRepoDefaultAddress;
-        crossfade(selectionCard, sourceRepoCard);
-      }
-
-      function selectedLabel(select) {
-        const opt = select.options[select.selectedIndex];
-        return opt ? opt.textContent : '';
-      }
-
-      const CLONE_BADGE = {
-        cloned: 'run-badge--cloned',
-        already_present: 'run-badge--present',
-        error: 'run-badge--clone-error',
-      };
-      const CLONE_BADGE_TEXT = {
-        cloned: 'cloned',
-        already_present: 'present',
-        error: 'error',
-      };
-      const GEN_BADGE = {
-        ok: 'run-badge--ok',
-        missing_files: 'run-badge--missing',
-        error: 'run-badge--gen-error',
-        not_cloned: 'run-badge--not-cloned',
-      };
-      const GEN_BADGE_TEXT = {
-        ok: 'ok',
-        missing_files: 'missing files',
-        error: 'error',
-        not_cloned: 'not cloned',
-      };
-
-      function renderUnitsPlaceholder(text) {
-        runUnits.innerHTML = '';
-        unitRows = new Map();
-        runUnitsCount.classList.add('d-none');
-        runUnitsError.classList.add('d-none');
-        runUnitsPlaceholder.textContent = text;
-        runUnitsPlaceholder.classList.remove('d-none');
-      }
-
-      function renderUnitsError(message) {
-        runUnits.innerHTML = '';
-        unitRows = new Map();
-        runUnitsCount.classList.add('d-none');
-        runUnitsPlaceholder.classList.add('d-none');
-        runUnitsError.querySelector('.login-error__text').textContent = message;
-        runUnitsError.classList.remove('d-none');
-      }
-
-      function renderUnitsList(units) {
-        runUnits.innerHTML = '';
-        unitRows = new Map();
-        runUnitsError.classList.add('d-none');
-        if (!units.length) {
-          runUnitsCount.classList.add('d-none');
-          runUnitsPlaceholder.textContent = 'NO UNITS';
-          runUnitsPlaceholder.classList.remove('d-none');
-          return;
-        }
-        runUnitsPlaceholder.classList.add('d-none');
-        for (const u of units) {
-          const row = document.createElement('li');
-          row.className = 'run-unit';
-
-          const id = document.createElement('span');
-          id.className = 'run-unit__id';
-          id.title = `${u.unit_name} (${u.version})`;
-
-          const name = document.createElement('span');
-          name.className = 'run-unit__name';
-          name.textContent = u.unit_name;
-
-          const version = document.createElement('span');
-          version.className = 'run-unit__version';
-          version.textContent = u.version;
-
-          id.appendChild(name);
-          id.appendChild(version);
-          row.appendChild(id);
-          runUnits.appendChild(row);
-          unitRows.set(u.unit_name, row);
-        }
-        runUnitsCount.textContent = String(units.length);
-        runUnitsCount.classList.remove('d-none');
-      }
-
-      async function loadRunUnits() {
-        const token = ++runUnitsToken;
-        runUnitData = [];
-        renderUnitsPlaceholder('LOADING…');
-        try {
-          const url = `/api/projects/${encodeURIComponent(projectSelect.value)}` +
-            `/platforms/${encodeURIComponent(platformSelect.value)}` +
-            `/versions/${encodeURIComponent(versionSelect.value)}/units`;
-          const res = await fetch(url, { credentials: 'same-origin' });
-          const body = await res.json().catch(() => ({}));
-          if (token !== runUnitsToken) return; // superseded by a newer load
-          if (res.ok) {
-            runUnitData = body.units || [];
-            renderUnitsList(runUnitData);
-          } else {
-            renderUnitsError(body.error || 'Failed to load units');
-          }
-        } catch (err) {
-          if (token !== runUnitsToken) return; // superseded by a newer load
-          renderUnitsError('Unable to reach the server');
-        }
-      }
-
-      function appendUnitBadge(row, kind, unit) {
-        if (!unit || !unit.status) return;
-        const classes = kind === 'clone' ? CLONE_BADGE : GEN_BADGE;
-        const texts = kind === 'clone' ? CLONE_BADGE_TEXT : GEN_BADGE_TEXT;
-        const span = document.createElement('span');
-        span.className = `run-badge ${classes[unit.status] || 'run-badge--unknown'}`;
-        span.textContent = texts[unit.status] || unit.status;
-        span.title = kind === 'clone'
-          ? `clone: ${unit.status}${unit.detail ? ' — ' + unit.detail : ''}`
-          : `generate: ${unit.status}`;
-        row.appendChild(span);
-      }
-
-      function applyRunResultToUnits(result) {
-        const cloneByUnit = new Map(((result.clone && result.clone.units) || []).map((u) => [u.unit_name, u]));
-        const genByUnit = new Map((result.units || []).map((u) => [u.unit_name, u]));
-        const names = [...new Set([
-          ...runUnitData.map((u) => u.unit_name),
-          ...cloneByUnit.keys(),
-          ...genByUnit.keys(),
-        ])];
-        renderUnitsList(names.map((name) => {
-          const preview = runUnitData.find((u) => u.unit_name === name);
-          const clone = cloneByUnit.get(name);
-          const gen = genByUnit.get(name);
-          return {
-            unit_name: name,
-            version: (clone && clone.version) || (gen && gen.version) || (preview && preview.version) || '',
-          };
-        }));
-        for (const name of names) {
-          const row = unitRows.get(name);
-          if (!row) continue;
-          appendUnitBadge(row, 'clone', cloneByUnit.get(name));
-          appendUnitBadge(row, 'generate', genByUnit.get(name));
-        }
-      }
-
-      function resetRunCard() {
-        currentTaskId = null;
-        closeOutputStream();
-        runOutput.innerHTML = '';
-        runOutputLineCount = 0;
-        runOutput.classList.add('d-none');
-        runCancelBtn.classList.add('d-none');
-        showRunDownload(null);
-        runUnitsToken++; // invalidate any in-flight units load
-        runUnitData = [];
-        unitRows = new Map();
-        runUnits.innerHTML = '';
-        runUnitsCount.classList.add('d-none');
-        runUnitsPlaceholder.classList.add('d-none');
-        runUnitsError.classList.add('d-none');
-        runStatus.textContent = '';
-        runResult.classList.add('d-none');
-        runResult.innerHTML = '';
-        runSubmitBtn.disabled = false;
-      }
-
-      function showRunCard() {
-        runSelectionSummary.textContent =
-          `${selectedLabel(projectSelect)} / ${selectedLabel(platformSelect)} / ${selectedLabel(versionSelect)}`;
-        resetRunCard();
-        loadRunUnits();
-        crossfade(sourceRepoCard, runCard);
-      }
-
-      // Re-attach the run card to a run the server still tracks (resume after a
-      // refresh/reload): the output stream replays the stored lines and sends
-      // a status snapshot, so this settles into a live tail or, for a
-      // terminal task, the completed/failed/cancelled state via finishRun.
-      function attachActiveRun(task) {
-        currentTaskId = task.task_id;
-        runStatus.textContent = 'Reconnecting…';
-        runCancelBtn.classList.remove('d-none');
-        openOutputStream(task.task_id);
-      }
-
-      function renderRunResult(result) {
-        applyRunResultToUnits(result);
-        const parts = [];
-        const scaleText = Object.entries(result.scale || {})
-          .map(([key, value]) => `${value} ${key}`)
-          .join(' · ');
-        if (scaleText) parts.push(`<p class="mb-1 text-center">${scaleText}</p>`);
-        const errors = result.validation_errors || [];
-        if (errors.length) {
-          const shown = errors.slice(0, 3).map((e) => e.reason).join('<br>');
-          const more = errors.length > 3 ? `<br>+${errors.length - 3} more` : '';
-          parts.push(`
-            <div class="login-error mb-0">
-              <i class="bi bi-exclamation-triangle-fill login-error__icon" aria-hidden="true"></i>
-              <span class="login-error__text">${errors.length} validation issue(s): ${shown}${more}</span>
-            </div>`);
-        }
-        runResult.innerHTML = parts.join('');
-        runResult.classList.remove('d-none');
-      }
-
-      function closeOutputStream() {
-        if (outputSource) {
-          outputSource.close();
-          outputSource = null;
-        }
-      }
-
-      function appendOutputLine(line) {
-        const row = document.createElement('div');
-        row.textContent = line; // textContent only — never HTML
-        runOutput.appendChild(row);
-        runOutputLineCount++;
-        runOutput.classList.remove('d-none');
-        runOutput.scrollTop = runOutput.scrollHeight;
-      }
-
-      function openOutputStream(taskId) {
-        closeOutputStream();
-        const source = new EventSource(`/api/msd/tasks/${encodeURIComponent(taskId)}/output`);
-        source.onmessage = (event) => appendOutputLine(event.data);
-        const handleStatus = (event) => {
-          if (currentTaskId !== taskId) return; // superseded by a newer run
-          let body;
-          try { body = JSON.parse(event.data); } catch (err) { return; }
-          if (body.state === 'SUCCESS' || body.state === 'FAILURE' || body.state === 'REVOKED') {
-            finishRun(body.state, body);
-          } else {
-            runStatus.textContent = body.state === 'STARTED' ? 'Running…' : 'Queued…';
-          }
-        };
-        source.addEventListener('status', handleStatus);
-        source.addEventListener('done', (event) => { closeOutputStream(); handleStatus(event); });
-        // On error, leave it to EventSource's auto-retry: the server resumes
-        // the lines from the last delivered event id and re-sends the current
-        // state as a snapshot. The stream is closed by finishRun and by
-        // resetRunCard.
-        outputSource = source;
-      }
-
-      function stopRunPolling() {
-        closeOutputStream();
-        runCancelBtn.classList.add('d-none');
-        runSubmitBtn.disabled = false;
-      }
-
-      function showRunDownload(taskId) {
-        if (taskId) {
-          runDownloadBtn.href = `/api/msd/tasks/${encodeURIComponent(taskId)}/download`;
-          runDownloadBtn.classList.remove('d-none');
-        } else {
-          runDownloadBtn.classList.add('d-none');
-        }
-      }
-
-      function finishRun(state, body) {
-        if (currentTaskId === null) return; // already finished (`done` after a terminal `status`)
-        const taskId = currentTaskId;
-        currentTaskId = null;
-        stopRunPolling();
-        if (state === 'SUCCESS') {
-          runStatus.textContent = 'Completed';
-          renderRunResult(body.result || {});
-          showRunDownload(taskId);
-        } else if (state === 'FAILURE') {
-          runStatus.textContent = body.error || 'Run failed';
-          showRunDownload(null);
-        } else {
-          // REVOKED
-          runStatus.textContent = 'Cancelled';
-          showRunDownload(null);
-        }
-      }
-
-      runSubmitBtn.addEventListener('click', async () => {
-        runSubmitBtn.disabled = true;
-        runOutput.innerHTML = '';
-        runOutputLineCount = 0;
-        runResult.classList.add('d-none');
-        showRunDownload(null);
-        loadRunUnits(); // re-run: back to the fresh pre-run preview, no stale badges
-        runStatus.textContent = 'Submitting…';
-        try {
-          const res = await fetch('/api/msd/run', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'same-origin',
-            body: JSON.stringify({
-              project_id: projectSelect.value,
-              platform_id: platformSelect.value,
-              version_id: versionSelect.value,
-            }),
-          });
-          const body = await res.json().catch(() => ({}));
-          if (res.ok) {
-            currentTaskId = body.task_id;
-            runStatus.textContent = 'Queued…';
-            runCancelBtn.classList.remove('d-none');
-            openOutputStream(body.task_id);
-          } else {
-            runStatus.textContent = body.error || 'Run failed to start';
-            runSubmitBtn.disabled = false;
-          }
-        } catch (err) {
-          runStatus.textContent = 'Unable to reach the server';
-          runSubmitBtn.disabled = false;
-        }
-      });
-
-      runCancelBtn.addEventListener('click', async () => {
-        runCancelBtn.disabled = true;
-        try {
-          const res = await fetch(`/api/msd/tasks/${encodeURIComponent(currentTaskId)}/cancel`, {
-            method: 'POST',
-            credentials: 'same-origin',
-          });
-          const body = await res.json().catch(() => ({}));
-          if (res.ok) {
-            // SUCCESS/FAILURE/REVOKED: the terminal state is already known,
-            // finish now. Otherwise the revocation was accepted but the
-            // backend still reports the pre-revocation state — the status
-            // stream delivers the terminal state a moment later.
-            if (body.state === 'SUCCESS' || body.state === 'FAILURE' || body.state === 'REVOKED') {
-              finishRun(body.state, body);
-            } else {
-              runStatus.textContent = 'Cancelling…';
-            }
-          } else {
-            // keep the stream open — the task is presumably still running
-            runStatus.textContent = body.error || 'Cancel failed';
-          }
-        } catch (err) {
-          runStatus.textContent = 'Unable to reach the server';
-        } finally {
-          runCancelBtn.disabled = false;
-        }
-      });
-
-      function showLoginCard() {
-        const postLoginCards = [configDbCard, selectionCard, sourceRepoCard, runCard];
-        const currentCard = postLoginCards.find((card) => !card.classList.contains('d-none')) || sourceRepoCard;
-
-        passwordInput.value = '';
-        configDbCard.reset();
-        resetSelect(projectSelect, 'PROJECT', false);
-        resetSelect(platformSelect, 'PLATFORM', true);
-        resetSelect(versionSelect, 'VERSION', true);
-        sourceRepoCard.reset();
-        resetRunCard();
-        setTopbarUsername('');
-        postLoginCards.forEach((card) => {
-          if (card !== currentCard) card.classList.add('d-none');
-        });
-
-        crossfade(currentCard, loginCard);
-      }
-
-      loginCard.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        loginError.classList.add('d-none');
-        loginSubmitBtn.disabled = true;
-        try {
-          const res = await fetch('/api/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'same-origin',
-            body: JSON.stringify({
-              username: loginCard.elements['username'].value,
-              password: passwordInput.value,
-            }),
-          });
-          const body = await res.json().catch(() => ({}));
-          if (res.ok) {
-            setTopbarUsername(body.username || '');
-            showConfigDbCard(body.defaults || {});
-          } else {
-            showError(body.error || 'Login failed');
-          }
-        } catch (err) {
-          showError('Unable to reach the server');
-        } finally {
-          loginSubmitBtn.disabled = false;
-        }
-      });
-
-      configDbCard.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        configDbError.classList.add('d-none');
-        configDbSubmitBtn.disabled = true;
-        try {
-          const res = await fetch('/api/data-sources/connect/config-mgmt-db', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'same-origin',
-            body: JSON.stringify({
-              connection_address: configDbCard.elements['configMgmtAddress'].value,
-              username: configDbCard.elements['configMgmtUsername'].value,
-              password: configDbCard.elements['configMgmtPassword'].value,
-            }),
-          });
-          const body = await res.json().catch(() => ({}));
-          if (res.ok) {
-            showSelectionCard();
-          } else {
-            showConfigDbError(body.error || 'Connection failed');
-          }
-        } catch (err) {
-          showConfigDbError('Unable to reach the server');
-        } finally {
-          configDbSubmitBtn.disabled = false;
-        }
-      });
-
-      selectionCard.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        selectionError.classList.add('d-none');
-        selectionSubmitBtn.disabled = true;
-        try {
-          const res = await fetch('/api/selection', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'same-origin',
-            body: JSON.stringify({
-              project_id: projectSelect.value,
-              platform_id: platformSelect.value,
-              version_id: versionSelect.value,
-            }),
-          });
-          const body = await res.json().catch(() => ({}));
-          if (res.ok) {
-            showSourceRepoCard();
-          } else {
-            showSelectionError(body.error || 'Failed to save selection');
-          }
-        } catch (err) {
-          showSelectionError('Unable to reach the server');
-        } finally {
-          selectionSubmitBtn.disabled = false;
-        }
-      });
-
-      sourceRepoCard.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        sourceRepoError.classList.add('d-none');
-        sourceRepoSubmitBtn.disabled = true;
-        try {
-          const res = await fetch('/api/data-sources/connect/source-code-repo', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'same-origin',
-            body: JSON.stringify({
-              connection_address: sourceRepoCard.elements['sourceRepoAddress'].value,
-              username: sourceRepoCard.elements['sourceRepoUsername'].value,
-              password: sourceRepoCard.elements['sourceRepoPassword'].value,
-            }),
-          });
-          const body = await res.json().catch(() => ({}));
-          if (res.ok) {
-            showRunCard();
-          } else {
-            showSourceRepoError(body.error || 'Connection failed');
-          }
-        } catch (err) {
-          showSourceRepoError('Unable to reach the server');
-        } finally {
-          sourceRepoSubmitBtn.disabled = false;
-        }
-      });
-
-      document.querySelectorAll('.logout-corner-btn').forEach((btn) => {
-        btn.addEventListener('click', async () => {
-          try {
-            await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
-          } finally {
-            showLoginCard();
-          }
-        });
-      });
-
-      document.getElementById('selectionCard-back').addEventListener('click', () => {
-        crossfade(selectionCard, configDbCard);
-      });
-      document.getElementById('sourceRepoCard-back').addEventListener('click', () => {
-        crossfade(sourceRepoCard, selectionCard);
-      });
-      document.getElementById('runCard-back').addEventListener('click', () => {
-        sourceRepoCard.elements['sourceRepoAddress'].value = sourceRepoDefaultAddress;
-        crossfade(runCard, sourceRepoCard);
-      });
-
-      (async function resumeSession() {
-        let sessionState = null;
-        try {
-          const res = await fetch('/api/session', { credentials: 'same-origin' });
-          sessionState = await res.json().catch(() => null);
-        } catch (err) {
-          sessionState = null;
-        }
-
-        if (!sessionState || !sessionState.authenticated) {
-          return;
-        }
-
-        const defaults = sessionState.defaults || {};
-        setTopbarUsername(sessionState.username || '');
-        configDbCard.elements['configMgmtAddress'].value = defaults.config_mgmt_db || '';
-        sourceRepoDefaultAddress = defaults.source_code_repo || '';
-        loginCard.classList.add('d-none');
-
-        // Resume at the first incomplete step: login → config-mgmt-DB connect →
-        // selection → source-code-repo connect → run card.
-        if (!sessionState.config_mgmt_db_connected) {
-          showOnlyCard(configDbCard);
-          return;
-        }
-
-        // The selection is persisted server-side; the options cascade
-        // re-validates it (and leaves the selects populated with the saved
-        // values, so Back navigation shows the remembered selection).
-        let selection = sessionState.selection;
-        if (selection) {
-          showOnlyCard(selectionCard);
-          const outcome = await resolveStoredSelection(selection);
-          if (outcome === 'indeterminate') return; // config DB unreachable — selection retained
-          if (outcome === 'stale') {
-            try {
-              await fetch('/api/selection', { method: 'DELETE', credentials: 'same-origin' });
-            } catch (err) { /* best effort — re-resolves as stale on the next load */ }
-            selection = null;
-          }
-        }
-
-        if (!selection) {
-          selectionError.classList.add('d-none');
-          loadProjects();
-          showOnlyCard(selectionCard);
-          return;
-        }
-
-        if (!sessionState.source_code_repo_connected) {
-          showSourceRepoCard();
-          return;
-        }
-
-        // All steps complete: land on the run card, re-attaching to the run the
-        // server still tracks. Prefill the selects from the task's own
-        // selection snapshot so the summary and unit preview describe the run.
-        if (sessionState.active_task) {
-          const task = sessionState.active_task;
-          selectOption(projectSelect, task.project_id);
-          selectOption(platformSelect, task.platform_id);
-          selectOption(versionSelect, task.version_id);
-        }
-        showRunCard();
-        showOnlyCard(runCard);
-        if (sessionState.active_task) {
-          attachActiveRun(sessionState.active_task);
-        }
-      })();
-    });
-  </script>
-</body>
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
 </html>

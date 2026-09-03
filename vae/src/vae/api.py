@@ -1,7 +1,7 @@
 """VAE's Flask API (SRS DSM-VAE req 3-6, minimal slice): authenticates the
 user against the LDAP directory service (delegating to vae's auth
 repository), lets the user connect to the config_mgmt_db and source_code_repo
-data sources with their own credentials, one at a time (delegating to vae's
+data sources with their own credentials, in either order (delegating to vae's
 composition root), select a project/platform/version (delegating to msd's
 config-mgmt repository), and trigger + monitor an MSD run (delegating to
 msd's Celery task runner).
@@ -12,17 +12,26 @@ Flask endpoints:
   POST /api/login                                     body {"username", "password"}
   POST /api/logout
   POST /api/data-sources/connect/config-mgmt-db        body {"connection_address", "username", "password"}  [login required]
-  POST /api/data-sources/connect/source-code-repo      body {"connection_address", "username", "password"}  [login + config_mgmt_db connected]
+  POST /api/data-sources/connect/source-code-repo      body {"connection_address", "username", "password"}  [login required]
   POST /api/selection   body {"project_id", "platform_id", "version_id"}  [login + config_mgmt_db connected]
   DELETE /api/selection                                                    [login + config_mgmt_db connected]
   GET  /api/projects                                                    [login + config_mgmt_db connected]
   GET  /api/projects/<project_id>/platforms                             [login + config_mgmt_db connected]
   GET  /api/projects/<project_id>/platforms/<platform_id>/versions      [login + config_mgmt_db connected]
   GET  /api/projects/<project_id>/platforms/<platform_id>/versions/<version_id>/units  [login + config_mgmt_db connected]
-  POST /api/msd/run   body {"project_id", "platform_id", "version_id"}  [login + both data sources connected]
+  GET  /api/projects/.../versions/<version_id>/msd-files                    [login + config_mgmt_db connected]
+  GET  /api/projects/.../versions/<version_id>/msd-files/<run_id>/model     [login + config_mgmt_db connected]
+  GET  /api/projects/.../versions/<version_id>/msd-files/<run_id>/download  [login + config_mgmt_db connected]
+  GET  /api/units/<unit_name>/versions                                 [login + source_code_repo connected]
+  POST /api/msd/run   body {"project_id", "platform_id", "version_id",
+                            "candidate"?: {"unit_name", "version"}}  [login + both data sources connected]
   GET  /api/msd/tasks/<task_id>/output                                 [login required]
-  GET  /api/msd/tasks/<task_id>/download                               [login required]
   POST /api/msd/tasks/<task_id>/cancel                                 [login required]
+
+Produced files are addressed by selection + run id (the run id being the task
+id of the run that produced them), not through the task runner — a task's
+execution record expires after RESULT_EXPIRES_SECONDS, the artifact it wrote
+does not.
 
 Run with:  vae-api  (or: python -m vae.api)
 The API host/port/session secret come from the [api] section of vae's config.ini.
@@ -33,13 +42,13 @@ from __future__ import annotations
 import functools
 import json
 import logging
-from pathlib import Path
 import time
 
 from flask import Flask, Response, jsonify, render_template, request, send_file, session
 
 from msd.domain.data_source import SourceType
 from msd.ports.config_management_repository import ConfigManagementAccessError
+from msd.ports.source_code_repository import SourceRepoAccessError, SourceRepoAuthError
 
 from vae.composition import Components, load_components
 from vae.config import get_config
@@ -51,14 +60,26 @@ logger = logging.getLogger(__name__)
 _SELECTION = ("project_id", "platform_id", "version_id")
 _CREDENTIALS = ("username", "password")
 _CONNECT_FIELDS = ("connection_address", "username", "password")
+_CANDIDATE_FIELDS = ("unit_name", "version")
 
 # Run stream (SSE) pacing: how often a still-running task's output store and
 # task status are re-checked, and the hard cap on one stream (leak guard — a
 # well-behaved EventSource closes on the `done` event or when the card is
 # reset). The stream carries the task's output lines, a `status` event on
-# every state change (plus a snapshot on connect/reconnect), and a final
-# `done` event carrying the terminal payload.
+# every state change (plus a snapshot on connect/reconnect), a `ping` every
+# PING_SECONDS of silence, and a final `done` event carrying the terminal
+# payload.
+#
+# A real run goes quiet for minutes at a time (source analysis logs once per
+# unit and nothing in between), and an SSE connection that carries no bytes
+# for that long is dropped by whatever sits on the path — without a FIN the
+# browser never fires `error`, so EventSource never reconnects and the run
+# card is stranded mid-run. So the stream says something on every ping
+# interval whether or not the task did: a named event rather than a `:`
+# comment, because the client watchdog has to be able to see it (comments
+# keep the socket warm but never reach JavaScript).
 _OUTPUT_STREAM_TICK_SECONDS = 0.5
+_OUTPUT_STREAM_PING_SECONDS = 15
 _OUTPUT_STREAM_MAX_SECONDS = 3600
 _OUTPUT_TERMINAL_STATES = ("SUCCESS", "FAILURE", "REVOKED")
 
@@ -72,6 +93,23 @@ def _status_payload(status: TaskStatus) -> dict:
     if status.error is not None:
         payload["error"] = status.error
     return payload
+
+
+def _candidate_from(body: dict):
+    """The optional candidate unit version a run is evaluating (SRS DSM-MSD
+    req 11), as (candidate, error_response). Absent is not an error — most
+    runs describe the versions the selected system version defines — but a
+    malformed one is refused here rather than reaching the worker, where a
+    silently dropped candidate would produce a run of the wrong versions."""
+    candidate = body.get("candidate")
+    if candidate is None:
+        return None, None
+    if not isinstance(candidate, dict):
+        return None, (jsonify({"error": "candidate must be a JSON object"}), 400)
+    missing = [key for key in _CANDIDATE_FIELDS if not candidate.get(key)]
+    if missing:
+        return None, (jsonify({"error": f"candidate missing field(s): {', '.join(missing)}"}), 400)
+    return {key: candidate[key] for key in _CANDIDATE_FIELDS}, None
 
 
 def login_required(view):
@@ -120,6 +158,19 @@ def create_app(components: Components = None) -> Flask:
         if missing:
             return None, (jsonify({"error": f"missing field(s): {', '.join(missing)}"}), 400)
         return body, None
+
+    def _msd_file(project_id, platform_id, version_id, run_id):
+        """The model_setup_data.json one run produced, or a 404 response.
+        Shared by the download and the model endpoints — the same file, served
+        two ways.
+
+        Addressed by selection + run id rather than through the task runner's
+        result: an execution record expires, the artifact does not, so a file
+        stays reachable for as long as it is on disk."""
+        path = components.msd_catalog.resolve(project_id, platform_id, version_id, run_id)
+        if path is None:
+            return None, (jsonify({"error": "model setup data file not found"}), 404)
+        return path, None
 
     @app.route("/")
     def index():
@@ -187,24 +238,28 @@ def create_app(components: Components = None) -> Flask:
         body, error = _connect_body()
         if error:
             return error
+        # The slot is claimed before the attempt, so a refused credential
+        # reuses it on the next try rather than stranding an empty one.
+        session["conn_token"] = token = components.open_token(session.get("conn_token"))
         try:
-            token = components.connect_config_mgmt_db(body)
+            components.connect_config_mgmt_db(token, body)
         except ConfigManagementAccessError as exc:
             return jsonify({"error": str(exc)}), 502
-        session["conn_token"] = token
         # A selection belongs to this config-mgmt-DB connection's epoch; a new
-        # connection (possibly to a different database) invalidates it.
+        # connection (possibly to a different database) invalidates it. Any
+        # other source connected in this session is untouched — the sources
+        # are peers, and only the selection came out of this one.
         session.pop("selection", None)
         return jsonify({"connected": True})
 
     @app.route("/api/data-sources/connect/source-code-repo", methods=["POST"])
     @login_required
-    @config_db_required
     def api_connect_source_repo():
         body, error = _connect_body()
         if error:
             return error
-        components.connect_source_repo(session["conn_token"], body)
+        session["conn_token"] = token = components.open_token(session.get("conn_token"))
+        components.connect_source_repo(token, body)
         return jsonify({"connected": True})
 
     @app.route("/api/selection", methods=["POST"])
@@ -271,6 +326,65 @@ def create_app(components: Components = None) -> Flask:
             return jsonify({"error": str(exc)}), 502
         return jsonify({"units": [u.to_dict() for u in units]})
 
+    @app.route("/api/units/<unit_name>/versions")
+    @login_required
+    @source_repo_required
+    def api_unit_versions(unit_name):
+        """The versions the source repository holds for one software unit —
+        the set a candidate version is chosen from (SRS DSM-MSD req 11).
+
+        Not nested under a selection: the repository is keyed by unit name
+        alone, and a candidate is precisely a version no system version
+        defines yet, so scoping it by one would be a fiction."""
+        source_repo = components.source_repo_factory(_connections()[SourceType.SOURCE_CODE_REPO])
+        try:
+            versions = source_repo.list_available_versions(unit_name)
+        except (SourceRepoAccessError, SourceRepoAuthError) as exc:
+            return jsonify({"error": str(exc)}), 502
+        return jsonify({"versions": versions})
+
+    @app.route("/api/projects/<project_id>/platforms/<platform_id>/versions/<version_id>/msd-files")
+    @login_required
+    @config_db_required
+    def api_msd_files(project_id, platform_id, version_id):
+        # Scoped by project/platform/version, not by user (SRS DSM-VAE req 5):
+        # a Model Setup Data file belongs to the selection it describes, and
+        # every signed-in user working that selection sees every file for it.
+        # Who produced each one rides along in the record instead.
+        records = components.msd_catalog.list(project_id, platform_id, version_id)
+        return jsonify({"files": [r.to_dict() for r in records]})
+
+    @app.route(
+        "/api/projects/<project_id>/platforms/<platform_id>/versions/<version_id>"
+        "/msd-files/<run_id>/model"
+    )
+    @login_required
+    @config_db_required
+    def api_msd_file_model(project_id, platform_id, version_id, run_id):
+        # Inline: the Core System Model card reads it with fetch, and an
+        # attachment would be saved instead.
+        path, error = _msd_file(project_id, platform_id, version_id, run_id)
+        if error is not None:
+            return error
+        return send_file(path, mimetype="application/json", as_attachment=False)
+
+    @app.route(
+        "/api/projects/<project_id>/platforms/<platform_id>/versions/<version_id>"
+        "/msd-files/<run_id>/download"
+    )
+    @login_required
+    @config_db_required
+    def api_msd_file_download(project_id, platform_id, version_id, run_id):
+        path, error = _msd_file(project_id, platform_id, version_id, run_id)
+        if error is not None:
+            return error
+        return send_file(
+            path,
+            mimetype="application/json",
+            as_attachment=True,
+            download_name=path.name,
+        )
+
     @app.route("/api/msd/run", methods=["POST"])
     @login_required
     @config_db_required
@@ -282,6 +396,9 @@ def create_app(components: Components = None) -> Flask:
         missing = [key for key in _SELECTION if not body.get(key)]
         if missing:
             return jsonify({"error": f"missing field(s): {', '.join(missing)}"}), 400
+        candidate, error = _candidate_from(body)
+        if error is not None:
+            return error
         connections = _connections()
         config_mgmt = connections[SourceType.CONFIG_MGMT_DB]
         source_repo = connections[SourceType.SOURCE_CODE_REPO]
@@ -292,19 +409,27 @@ def create_app(components: Components = None) -> Flask:
                 body["project_id"], body["platform_id"], body["version_id"],
                 config_mgmt.connection_address, config_mgmt_username, config_mgmt_password,
                 source_repo.connection_address, source_repo_username, source_repo_password,
+                # Recorded inside the produced file, so the listing can say who
+                # produced it long after this session is gone.
+                produced_by=session["username"],
+                # Likewise recorded in the file's inventory, which is what
+                # tells two runs of one selection apart in a listing.
+                candidate=candidate,
             )
         except Exception as exc:
             logger.warning("msd/run: task submission failed: %s", exc)
             return jsonify({"error": str(exc)}), 502
         # The UI re-attaches to this run after a refresh/reload (its output
         # stream replays the stored lines plus a status snapshot). The task's
-        # own selection snapshot rides along so the run card can describe it
-        # even if the user's saved selection changes before the reload.
+        # own selection snapshot — and the candidate it is evaluating — rides
+        # along so the run card can describe it even if the user's saved
+        # selection changes before the reload.
         session["active_task"] = {
             "task_id": task_id,
             "project_id": body["project_id"],
             "platform_id": body["platform_id"],
             "version_id": body["version_id"],
+            "candidate": candidate,
             "submitted_at": time.time(),
         }
         return jsonify({"task_id": task_id}), 202
@@ -319,36 +444,28 @@ def create_app(components: Components = None) -> Flask:
             return jsonify({"error": str(exc)}), 502
         return jsonify(_status_payload(status))
 
-    @app.route("/api/msd/tasks/<task_id>/download")
-    @login_required
-    def api_msd_task_download(task_id):
-        output_path = (components.msd_task_runner.status(task_id).result or {}).get("output_path")
-        if not output_path:
-            return jsonify({"error": "run has no output file"}), 404
-        path = Path(output_path)
-        if not path.is_file():
-            return jsonify({"error": "output file not found"}), 404
-        return send_file(
-            path,
-            mimetype="application/json",
-            as_attachment=True,
-            download_name=path.name,
-        )
-
     @app.route("/api/msd/tasks/<task_id>/output")
     @login_required
     def api_msd_task_output(task_id):
         # EventSource reconnects after a dropped stream carrying the last
-        # event id it processed, so the stream resumes at that line instead
-        # of replaying what the client already has.
+        # event id it processed, so the stream resumes at the line *after*
+        # that one instead of replaying what the client already has. Only the
+        # browser's own reconnect sends that header, though — a client that
+        # reopens the stream itself (its watchdog having caught a drop the
+        # browser never noticed) says where to resume in the query string.
+        resume = request.headers.get("Last-Event-ID") or request.args.get("last_event_id")
         try:
-            cursor = int(request.headers.get("Last-Event-ID") or 0)
-        except ValueError:
+            # Clamped: a negative id would slice from the end of the log and
+            # replay the tail as if it were the head.
+            cursor = max(0, int(resume) + 1)
+        except (TypeError, ValueError):
             cursor = 0
 
         def stream():
             nonlocal cursor
-            deadline = time.monotonic() + _OUTPUT_STREAM_MAX_SECONDS
+            now = time.monotonic()
+            deadline = now + _OUTPUT_STREAM_MAX_SECONDS
+            last_written = now
             last_state = None
             while time.monotonic() < deadline:
                 try:
@@ -361,14 +478,20 @@ def create_app(components: Components = None) -> Flask:
                 for index, line in enumerate(lines[cursor:], start=cursor):
                     yield f"id: {index}\ndata: {line}\n\n"
                     cursor = index + 1
-                # No `id:` on status/done events — state isn't resumable, a
-                # reconnect gets a fresh snapshot (last_state starts None).
+                    last_written = time.monotonic()
+                # No `id:` on status/done/ping events — none of them is
+                # resumable, and a reconnect gets a fresh snapshot of the
+                # state anyway (last_state starts None).
                 if status.state != last_state:
                     last_state = status.state
                     yield f"event: status\ndata: {json.dumps(_status_payload(status))}\n\n"
+                    last_written = time.monotonic()
                 if status.state in _OUTPUT_TERMINAL_STATES:
                     yield f"event: done\ndata: {json.dumps(_status_payload(status))}\n\n"
                     return
+                if time.monotonic() - last_written >= _OUTPUT_STREAM_PING_SECONDS:
+                    yield "event: ping\ndata: {}\n\n"
+                    last_written = time.monotonic()
                 time.sleep(_OUTPUT_STREAM_TICK_SECONDS)
 
         return Response(

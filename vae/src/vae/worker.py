@@ -23,6 +23,7 @@ from msd.adapters.source_code.git_source_code_repository import GitSourceCodeRep
 from msd.composition import load_components
 from msd.config import get_config as get_msd_config
 from msd.domain.data_source import DataSourceConfig, SourceType
+from msd.domain.inventory import CandidateUnitVersion
 
 from vae.adapters.redis_task_output_store import RedisTaskOutputStore
 from vae.config import get_config
@@ -99,10 +100,25 @@ def run_msd_workflow(
     source_repo_address: str,
     source_repo_username: str,
     source_repo_password: str,
+    produced_by: str = None,
+    candidate: dict = None,
 ) -> dict:
-    """Full MSD workflow for one selection, in a workspace dir keyed by this
-    task's id: all artifacts (cloned unit repositories and
-    model_setup_data.json) live under <msd workspace>/<task_id>/<project>/<platform>/<version>.
+    """Full MSD workflow for one selection, in a run dir keyed by this task's
+    id: all artifacts (cloned unit repositories and model_setup_data.json)
+    live under <msd workspace>/<project>/<platform>/<version>/<task_id>.
+
+    The task id is the run id, and it is the innermost path segment, so every
+    run for a selection sits directly under that selection's directory and can
+    be listed from it (GET .../versions/<v>/msd-files).
+
+    `produced_by` is the authenticated username the API passes through, and is
+    recorded inside the produced file for traceability.
+
+    `candidate` is the optional {"unit_name", "version"} being evaluated for
+    installation (SRS DSM-MSD req 11) — a plain dict because task arguments
+    cross the broker as JSON. The run then acquires and records that version
+    for that unit, alongside the other units at the versions the selected
+    system version defines.
 
     Connects to config_mgmt_db and source_code_repo with the credentials the
     user supplied at login time, rather than any static config — msd itself
@@ -138,7 +154,13 @@ def run_msd_workflow(
 
         components = load_components(config_repo=config_repo, source_repo=source_repo)
         return components.workflow().execute(
-            components.workspace / self.request.id, project_id, platform_id, version_id
+            components.workspace,
+            project_id,
+            platform_id,
+            version_id,
+            run_id=self.request.id,
+            produced_by=produced_by,
+            candidate=CandidateUnitVersion.from_dict(candidate),
         ).to_dict()
     finally:
         logging.getLogger().removeHandler(output_handler)

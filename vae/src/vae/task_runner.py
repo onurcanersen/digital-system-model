@@ -36,11 +36,16 @@ class ITaskRunner(ABC):
         source_repo_address: str,
         source_repo_username: str,
         source_repo_password: str,
+        produced_by: Optional[str] = None,
+        candidate: Optional[Dict] = None,
     ) -> str:
         """Queue one clone → generate execution for a selection, connecting to
         config_mgmt_db and source_code_repo with the given caller-supplied
-        credentials. Returns the task id; raises if the execution backend is
-        unreachable."""
+        credentials. `produced_by` names the user the run is on behalf of, and
+        is recorded in the produced file. `candidate` is the optional
+        {"unit_name", "version"} the run evaluates in place of the version the
+        system version defines (SRS DSM-MSD req 11). Returns the task id;
+        raises if the execution backend is unreachable."""
 
     @abstractmethod
     def status(self, task_id: str) -> TaskStatus:
@@ -84,11 +89,14 @@ class CeleryTaskRunner(ITaskRunner):
         source_repo_address: str,
         source_repo_username: str,
         source_repo_password: str,
+        produced_by: Optional[str] = None,
+        candidate: Optional[Dict] = None,
     ) -> str:
         async_result = run_msd_workflow.delay(
             project_id, platform_id, version_id,
             config_mgmt_address, config_mgmt_username, config_mgmt_password,
             source_repo_address, source_repo_username, source_repo_password,
+            produced_by, candidate,
         )
         return async_result.id
 

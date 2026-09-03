@@ -17,12 +17,18 @@ class FakeSourceCodeRepository(ISourceCodeRepository):
         mandatory_files: Optional[List[str]] = None,
         clone_results: Optional[Dict[str, List[AcquiredFile]]] = None,
         raise_error: Optional[Exception] = None,
+        available_versions: Optional[Dict[str, List[str]]] = None,
     ):
         self._mandatory_files = mandatory_files if mandatory_files is not None else ["Makefile", "src/unit.xml"]
         self._clone_results = clone_results or {}
         self._raise_error = raise_error
+        self._available_versions = available_versions or {}
+        # (unit_name, version) per clone attempt — what a candidate run is
+        # asserted against, since the version is the ref the real adapter asks for.
+        self.cloned: List[tuple] = []
 
     def clone_unit(self, unit: SoftwareUnitVersion, dest_dir: Path) -> List[AcquiredFile]:
+        self.cloned.append((unit.unit_name, unit.version))
         if self._raise_error is not None:
             raise self._raise_error
         return self._clone_results.get(unit.unit_name, [])
@@ -43,6 +49,11 @@ class FakeSourceCodeRepository(ISourceCodeRepository):
     def list_mandatory_files(self, unit_name: str) -> List[str]:
         return list(self._mandatory_files)
 
+    def list_available_versions(self, unit_name: str) -> List[str]:
+        if self._raise_error is not None:
+            raise self._raise_error
+        return list(self._available_versions.get(unit_name, []))
+
 
 class DiskCloningSourceCodeRepository(FakeSourceCodeRepository):
     """Clone that actually writes the unit directory to disk, like the git
@@ -55,10 +66,12 @@ class DiskCloningSourceCodeRepository(FakeSourceCodeRepository):
         self._fail_units = set(fail_units)
 
     def clone_unit(self, unit: SoftwareUnitVersion, dest_dir: Path) -> List[AcquiredFile]:
+        self.cloned.append((unit.unit_name, unit.version))
         if unit.unit_name in self._fail_units:
             raise SourceRepoAccessError(f"cannot clone '{unit.unit_name}'")
         unit_dir = dest_dir / unit.unit_name
         (unit_dir / "src").mkdir(parents=True, exist_ok=True)
         (unit_dir / "Makefile").write_text("all:\n", encoding="utf-8")
         (unit_dir / "src" / f"{unit.unit_name}.xml").write_text("<manifest/>", encoding="utf-8")
-        return super().clone_unit(unit, dest_dir)
+        # Not super().clone_unit(): it would record the attempt a second time.
+        return self._clone_results.get(unit.unit_name, [])

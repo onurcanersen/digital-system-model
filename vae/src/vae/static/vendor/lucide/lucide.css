@@ -1,0 +1,107 @@
+/*!
+ * Lucide v1.39.0 icon font (https://lucide.dev/)
+ * Copyright (c) 2026 Lucide Icons and Contributors
+ * Licensed under ISC (https://github.com/lucide-icons/lucide/blob/main/LICENSE)
+ *
+ * Subset of the lucide-static font: only the glyphs this app renders are
+ * kept, so the two faces stay a few kilobytes instead of ~300. Adding an
+ * icon to the markup means re-subsetting the upstream font for its
+ * codepoint as well as adding the rule below.
+ */
+@font-face {
+  font-family: lucide;
+  font-display: block;
+  src: url("fonts/lucide.woff2") format("woff2"),
+    url("fonts/lucide.woff") format("woff");
+}
+
+.lucide::before,
+[class^="lucide-"]::before,
+[class*=" lucide-"]::before {
+  display: inline-block;
+  font-family: lucide !important;
+  font-style: normal;
+  font-weight: 400 !important;
+  font-variant: normal;
+  text-transform: none;
+  line-height: 1;
+  vertical-align: -0.125em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.lucide-arrow-left::before {
+  content: "\e048";
+}
+.lucide-arrow-right::before {
+  content: "\e049";
+}
+.lucide-box-select::before {
+  content: "\e1cb";
+}
+.lucide-check::before {
+  content: "\e06c";
+}
+.lucide-chevron-down::before {
+  content: "\e06d";
+}
+.lucide-circle-check::before {
+  content: "\e226";
+}
+.lucide-circle-user::before {
+  content: "\e461";
+}
+.lucide-circle-x::before {
+  content: "\e084";
+}
+.lucide-database::before {
+  content: "\e0ad";
+}
+.lucide-download::before {
+  content: "\e0b2";
+}
+.lucide-eye::before {
+  content: "\e0ba";
+}
+.lucide-eye-off::before {
+  content: "\e0bb";
+}
+.lucide-file-code::before {
+  content: "\e0c3";
+}
+.lucide-hard-drive::before {
+  content: "\e0ed";
+}
+.lucide-key::before {
+  content: "\e0fd";
+}
+.lucide-list-checks::before {
+  content: "\e1d0";
+}
+.lucide-log-out::before {
+  content: "\e10e";
+}
+.lucide-network::before {
+  content: "\e125";
+}
+.lucide-package::before {
+  content: "\e129";
+}
+.lucide-rocket::before {
+  content: "\e286";
+}
+.lucide-search::before {
+  content: "\e151";
+}
+.lucide-server::before {
+  content: "\e153";
+}
+.lucide-triangle-alert::before {
+  content: "\e193";
+}
+.lucide-user::before {
+  content: "\e19f";
+}
+.lucide-x::before {
+  content: "\e1b2";
+}

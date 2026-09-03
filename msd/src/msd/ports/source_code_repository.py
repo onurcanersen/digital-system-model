@@ -49,3 +49,16 @@ class ISourceCodeRepository(ABC):
     @abstractmethod
     def list_mandatory_files(self, unit_name: str) -> List[str]:
         """Return the file names that are mandatory to obtain for `unit_name` (req 15)."""
+
+    @abstractmethod
+    def list_available_versions(self, unit_name: str) -> List[str]:
+        """The versions the repository holds for `unit_name`, newest first —
+        the set a candidate version may be chosen from (req 11).
+
+        The repository is asked rather than the configuration management
+        database because a candidate is a version being evaluated for
+        installation, which no system version defines yet.
+
+        Returns an empty list for a unit with no published versions. Raises
+        SourceRepoAccessError/SourceRepoAuthError on the respective failure,
+        as `clone_unit` does (req 16)."""

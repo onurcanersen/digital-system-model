@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
-from msd.domain.inventory import SoftwareUnitVersion
+from msd.domain.inventory import CandidateUnitVersion, SoftwareUnitVersion
 from msd.domain.status import CloneStatus
 from msd.ports.source_code_repository import (
     ISourceCodeRepository,
@@ -62,11 +62,15 @@ class CloneSoftwareUnits:
         project_id: Optional[str] = None,
         platform_id: Optional[str] = None,
         version_id: Optional[str] = None,
+        candidate: Optional[CandidateUnitVersion] = None,
     ) -> List[CloneUnitResult]:
         context_result = self._project_context.execute(project_id, platform_id, version_id)
         if context_result.context is None:
             raise RuntimeError(f"Cannot acquire project context: {context_result.error}")
-        inventory = self._inventory.execute(context_result.context)
+        # With a candidate, the inventory names its version for that unit, so
+        # the clone below fetches the candidate's ref rather than the one the
+        # system version pins (req 11).
+        inventory = self._inventory.execute(context_result.context, candidate)
 
         dest_root.mkdir(parents=True, exist_ok=True)
         results: List[CloneUnitResult] = []
