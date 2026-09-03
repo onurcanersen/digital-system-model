@@ -57,7 +57,8 @@ Then open the UI at <http://127.0.0.1:8080>.
 | Method | Path | Description |
 | ------ | ---- | ----------- |
 | GET | `/` | Single-page UI |
-| GET | `/api/session` | Session state for resume: auth, data-source connection flags, persisted selection, and the tracked run (task id + its selection snapshot + submission time; dropped once past the worker's result expiry) |
+| GET | `/api/session` | Session state for resume: auth, data-source connection flags, persisted selection, the tracked run (task id + its selection snapshot + submission time; dropped once past the worker's result expiry), and the UI record below |
+| POST | `/api/session/ui` | Record where the user is standing so a reload can put them back: body `{"view", "model_file"?, "candidate"?}` — the card on screen, the run id of the produced file the Core System Model card is showing, and a candidate chosen but not yet run. Scoped to the selection, and dropped with it |
 | GET | `/api/projects` | List projects (via msd's config-mgmt repository) |
 | GET | `/api/projects/<project_id>/platforms` | List platforms for a project |
 | GET | `/api/projects/<project_id>/platforms/<platform_id>/versions` | List versions for a platform |

@@ -10,7 +10,7 @@ from vae.domain.user import Role, User
 from vae.ports.auth_repository import IAuthRepository
 
 
-class InMemoryLdapAuthRepository(IAuthRepository):
+class LdapAuthRepository(IAuthRepository):
     _USERS = {
         "admin": ("admin", Role.ADMIN),
         "operator": ("operator", Role.OPERATOR),

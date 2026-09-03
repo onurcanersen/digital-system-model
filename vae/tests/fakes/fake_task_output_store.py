@@ -1,5 +1,6 @@
-"""In-memory stand-in for the task output store: the dev/test default for
-Components, so a missing/standalone redis never blocks the API or tests."""
+"""In-process ITaskOutputStore for vae's tests: keeps a task's output lines
+in a dict, so no redis is needed to exercise the worker's capture or the
+API's run stream."""
 
 from __future__ import annotations
 
@@ -8,7 +9,7 @@ from typing import Dict, List
 from vae.ports.task_output_store import ITaskOutputStore
 
 
-class InMemoryTaskOutputStore(ITaskOutputStore):
+class FakeTaskOutputStore(ITaskOutputStore):
     def __init__(self) -> None:
         self._lines: Dict[str, List[str]] = {}
 

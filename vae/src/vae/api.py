@@ -9,6 +9,7 @@ msd's Celery task runner).
 Flask endpoints:
   GET  /
   GET  /api/session
+  POST /api/session/ui  body {"view", "model_file"?, "candidate"?}          [login required]
   POST /api/login                                     body {"username", "password"}
   POST /api/logout
   POST /api/data-sources/connect/config-mgmt-db        body {"connection_address", "username", "password"}  [login required]
@@ -52,7 +53,7 @@ from msd.ports.source_code_repository import SourceRepoAccessError, SourceRepoAu
 
 from vae.composition import Components, load_components
 from vae.config import get_config
-from vae.task_runner import TaskStatus
+from vae.domain.task_status import TaskStatus
 from vae.worker import RESULT_EXPIRES_SECONDS
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,13 @@ _SELECTION = ("project_id", "platform_id", "version_id")
 _CREDENTIALS = ("username", "password")
 _CONNECT_FIELDS = ("connection_address", "username", "password")
 _CANDIDATE_FIELDS = ("unit_name", "version")
+
+# The cards a reload can land back on. The UI is one page with no addresses of
+# its own, so where the user was standing is session state like the selection
+# is — and, like it, it is only ever restored into a UI that already agrees
+# with the server about everything else. `boot` and `login` are absent
+# deliberately: neither is a place to come back to.
+_RESUMABLE_VIEWS = ("sources", "select", "inventory", "files", "run", "model")
 
 # Run stream (SSE) pacing: how often a still-running task's output store and
 # task status are re-checked, the hard cap on one stream, and the grace window
@@ -230,7 +238,34 @@ def create_app(components: Components = None) -> Flask:
             "source_code_repo_connected": SourceType.SOURCE_CODE_REPO in connections,
             "selection": session.get("selection"),
             "active_task": active_task,
+            "ui": session.get("ui"),
         })
+
+    @app.route("/api/session/ui", methods=["POST"])
+    @login_required
+    def api_set_ui():
+        body = request.get_json(silent=True, force=True)
+        if not isinstance(body, dict):
+            return jsonify({"error": "request body must be a JSON object"}), 400
+        view = body.get("view")
+        if view not in _RESUMABLE_VIEWS:
+            return jsonify({
+                "error": f"view must be one of: {', '.join(_RESUMABLE_VIEWS)}"
+            }), 400
+        candidate, error = _candidate_from(body)
+        if error is not None:
+            return error
+        session["ui"] = {
+            "view": view,
+            # The produced file the Model card is showing, by the run id that
+            # addresses it under the current selection. The file itself is not
+            # stored: it outlives the session, and the listing is read fresh.
+            "model_file": body.get("model_file") or None,
+            # A candidate chosen but not yet run. Once a run is submitted the
+            # run's own record is the authority on what it is evaluating.
+            "candidate": candidate,
+        }
+        return "", 204
 
     @app.route("/api/logout", methods=["POST"])
     def api_logout():
@@ -256,6 +291,10 @@ def create_app(components: Components = None) -> Flask:
         # other source connected in this session is untouched — the sources
         # are peers, and only the selection came out of this one.
         session.pop("selection", None)
+        # Everything the UI record holds is addressed by that selection — the
+        # produced file, the candidate, and the cards that presuppose a
+        # context — so it goes with it.
+        session.pop("ui", None)
         return jsonify({"connected": True})
 
     @app.route("/api/data-sources/connect/source-code-repo", methods=["POST"])
@@ -278,14 +317,21 @@ def create_app(components: Components = None) -> Flask:
         missing = [key for key in _SELECTION if not body.get(key)]
         if missing:
             return jsonify({"error": f"missing field(s): {', '.join(missing)}"}), 400
-        session["selection"] = {key: body[key] for key in _SELECTION}
-        return jsonify({"selection": session["selection"]})
+        selection = {key: body[key] for key in _SELECTION}
+        # Re-confirming the same selection is not a change of context: the file
+        # on show and the candidate still describe it, so they stay. A
+        # different one leaves them describing nothing.
+        if selection != session.get("selection"):
+            session.pop("ui", None)
+        session["selection"] = selection
+        return jsonify({"selection": selection})
 
     @app.route("/api/selection", methods=["DELETE"])
     @login_required
     @config_db_required
     def api_clear_selection():
         session.pop("selection", None)
+        session.pop("ui", None)
         return "", 204
 
     @app.route("/api/projects")

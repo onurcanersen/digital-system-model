@@ -7,10 +7,11 @@ from pathlib import Path
 
 from fakes.fake_config_management_repository import FakeConfigManagementRepository
 from fakes.fake_source_code_repository import FakeSourceCodeRepository
+from fakes.fake_task_output_store import FakeTaskOutputStore
 from fakes.fake_task_runner import FakeTaskRunner
 
 from vae import api as vae_api
-from vae.adapters.in_memory_ldap_auth_repository import InMemoryLdapAuthRepository
+from vae.adapters.ldap_auth_repository import LdapAuthRepository
 from vae.api import create_app
 from vae.composition import Components
 
@@ -44,7 +45,8 @@ def _components(workspace=None, task_runner=None, source_repo=None, **config_rep
         or FakeSourceCodeRepository(available_versions=_UNIT_VERSIONS),
         msd_task_runner=task_runner
         or FakeTaskRunner(run=lambda **ids: {"selection": {k: ids[k] for k in SELECTION}}),
-        auth_repo=InMemoryLdapAuthRepository(),
+        auth_repo=LdapAuthRepository(),
+        task_output_store=FakeTaskOutputStore(),
         msd_catalog=FilesystemModelSetupDataCatalog(workspace or Path("/nonexistent-workspace")),
     )
 
@@ -356,7 +358,8 @@ def test_cancel_failure_maps_to_502():
         config_repo_factory=lambda ds: FakeConfigManagementRepository(),
         source_repo_factory=lambda ds: FakeSourceCodeRepository(),
         msd_task_runner=_BrokenCancelRunner(run=lambda **ids: None),
-        auth_repo=InMemoryLdapAuthRepository(),
+        auth_repo=LdapAuthRepository(),
+        task_output_store=FakeTaskOutputStore(),
     )
     client = _client(components)
     _login(client)
@@ -406,7 +409,8 @@ def test_output_stream_emits_status_on_state_changes(monkeypatch):
             run=lambda **ids: {"selection": {k: ids[k] for k in SELECTION}},
             state_sequence=["PENDING", "STARTED"],
         ),
-        auth_repo=InMemoryLdapAuthRepository(),
+        auth_repo=LdapAuthRepository(),
+        task_output_store=FakeTaskOutputStore(),
     )
     client = _client(components)
     _login(client)
@@ -460,7 +464,8 @@ def test_output_stream_pings_while_the_run_is_quiet(monkeypatch):
             run=lambda **ids: {"selection": {k: ids[k] for k in SELECTION}},
             state_sequence=["STARTED", "STARTED"],
         ),
-        auth_repo=InMemoryLdapAuthRepository(),
+        auth_repo=LdapAuthRepository(),
+        task_output_store=FakeTaskOutputStore(),
     )
     client = _client(components)
     _login(client)
@@ -667,7 +672,8 @@ def test_runner_submission_failure_maps_to_502():
         config_repo_factory=lambda ds: FakeConfigManagementRepository(),
         source_repo_factory=lambda ds: FakeSourceCodeRepository(),
         msd_task_runner=_BrokenRunner(run=lambda **ids: None),
-        auth_repo=InMemoryLdapAuthRepository(),
+        auth_repo=LdapAuthRepository(),
+        task_output_store=FakeTaskOutputStore(),
     )
 
     client = _client(components)
@@ -756,7 +762,8 @@ def test_units_access_error_maps_to_502():
         config_repo_factory=lambda ds: _BrokenUnitsRepo(),
         source_repo_factory=lambda ds: FakeSourceCodeRepository(),
         msd_task_runner=FakeTaskRunner(run=lambda **ids: None),
-        auth_repo=InMemoryLdapAuthRepository(),
+        auth_repo=LdapAuthRepository(),
+        task_output_store=FakeTaskOutputStore(),
     )
     client = _client(components)
     _login(client)
@@ -824,6 +831,7 @@ def test_session_reports_connection_state_and_empty_persistence():
     assert body["source_code_repo_connected"] is True
     assert body["selection"] is None
     assert body["active_task"] is None
+    assert body["ui"] is None
 
 
 def test_set_selection_requires_login_and_config_db():
@@ -947,12 +955,118 @@ def test_stale_active_task_is_dropped_from_session():
         assert "active_task" not in sess
 
 
+UI = {"view": "model", "model_file": "run-1", "candidate": {"unit_name": "sensor_app", "version": "1.0.2"}}
+
+
+def _set_ui(client, **overrides):
+    return client.post("/api/session/ui", json=dict(UI, **overrides))
+
+
+def test_ui_record_is_reflected_in_session():
+    client = _client()
+    _login(client)
+    _connect_data_sources(client)
+
+    resp = _set_ui(client)
+    assert resp.status_code == 204
+
+    assert client.get("/api/session").get_json()["ui"] == UI
+
+
+def test_ui_record_defaults_the_parts_a_card_does_not_carry():
+    client = _client()
+    _login(client)
+
+    assert _set_ui(client, view="sources", model_file=None, candidate=None).status_code == 204
+
+    assert client.get("/api/session").get_json()["ui"] == {
+        "view": "sources",
+        "model_file": None,
+        "candidate": None,
+    }
+
+
+def test_ui_record_requires_login():
+    resp = _set_ui(_client())
+
+    assert resp.status_code == 401
+    assert resp.get_json() == {"error": "authentication required"}
+
+
+def test_ui_record_refuses_a_card_that_cannot_be_resumed():
+    client = _client()
+    _login(client)
+    _set_ui(client)
+
+    for view in ("boot", "login", "elsewhere", None):
+        resp = _set_ui(client, view=view)
+        assert resp.status_code == 400, view
+        assert "view must be one of" in resp.get_json()["error"]
+
+    # The refused writes left the standing record alone.
+    assert client.get("/api/session").get_json()["ui"] == UI
+
+
+def test_ui_record_refuses_a_malformed_candidate():
+    client = _client()
+    _login(client)
+    _set_ui(client)
+
+    resp = _set_ui(client, candidate={"unit_name": "sensor_app"})
+    assert resp.status_code == 400
+    assert "candidate missing field" in resp.get_json()["error"]
+
+    assert client.get("/api/session").get_json()["ui"] == UI
+
+
+def test_selecting_a_different_context_drops_the_ui_record():
+    client = _client()
+    _login(client)
+    _connect_data_sources(client)
+    client.post("/api/selection", json=SELECTION)
+    _set_ui(client)
+
+    # The same selection again is not a change of context: the file on show
+    # and the candidate still describe it.
+    assert client.post("/api/selection", json=SELECTION).status_code == 200
+    assert client.get("/api/session").get_json()["ui"] == UI
+
+    other = dict(SELECTION, version_id="ver-other")
+    assert client.post("/api/selection", json=other).status_code == 200
+    assert client.get("/api/session").get_json()["ui"] is None
+
+
+def test_delete_selection_clears_the_ui_record():
+    client = _client()
+    _login(client)
+    _connect_data_sources(client)
+    client.post("/api/selection", json=SELECTION)
+    _set_ui(client)
+
+    assert client.delete("/api/selection").status_code == 204
+
+    assert client.get("/api/session").get_json()["ui"] is None
+
+
+def test_reconnecting_config_mgmt_db_clears_the_ui_record():
+    client = _client()
+    _login(client)
+    _connect_data_sources(client)
+    client.post("/api/selection", json=SELECTION)
+    _set_ui(client)
+
+    assert _connect_config_mgmt_db(client).status_code == 200
+
+    assert client.get("/api/session").get_json()["ui"] is None
+
+
 def test_logout_clears_selection_and_active_task():
     client = _client()
     _login(client)
     _connect_data_sources(client)
     client.post("/api/selection", json=SELECTION)
     client.post("/api/msd/run", json=SELECTION)
+    _set_ui(client)
 
     resp = client.post("/api/logout")
     assert resp.status_code == 204
@@ -961,3 +1075,4 @@ def test_logout_clears_selection_and_active_task():
     body = client.get("/api/session").get_json()
     assert body["selection"] is None
     assert body["active_task"] is None
+    assert body["ui"] is None

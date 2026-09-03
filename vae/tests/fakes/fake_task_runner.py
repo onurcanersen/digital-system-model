@@ -7,7 +7,8 @@ from __future__ import annotations
 import uuid
 from typing import Callable, Optional
 
-from vae.task_runner import ITaskRunner, TaskStatus
+from vae.domain.task_status import TaskStatus
+from vae.ports.task_runner import ITaskRunner
 
 
 class FakeTaskRunner(ITaskRunner):

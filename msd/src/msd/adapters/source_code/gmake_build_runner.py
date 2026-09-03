@@ -5,7 +5,7 @@ definition at build time — if that hasn't run yet, ISourceAnalyzer would
 have nothing to scan.
 
 The `find_valid_makefile`/`run_regenerate_code` functions are pure helpers;
-`MakeBuildRunner` is the IBuildRunner adapter that combines them for
+`GmakeBuildRunner` is the IBuildRunner adapter that combines them for
 AnalyzeSoftwareUnits.
 
 A build's own non-zero exit code is intentionally NOT treated as failure —
@@ -81,7 +81,7 @@ def run_regenerate_code(makefile_path: Path, timeout: int = DEFAULT_TIMEOUT_SECO
         return False, message
 
 
-class MakeBuildRunner(IBuildRunner):
+class GmakeBuildRunner(IBuildRunner):
     """IBuildRunner backed by `gmake regenerate_code` (config.ini's
     makefile_include_patterns decide which Makefiles count as valid)."""
 

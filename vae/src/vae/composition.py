@@ -1,7 +1,8 @@
 """Composition root for VAE: builds VAE's own config-mgmt repository factory
 (by reusing msd's adapter directly, SRS DSM-VAE req 2, 4-5), VAE's own
-Celery-backed task runner (task_runner.py), which triggers/tracks vae's
-own run_msd_workflow task — msd itself has no API/worker/task of its own
+Celery-backed task runner (adapters/celery_task_runner.py), which
+triggers/tracks vae's own run_msd_workflow task — msd itself has no
+API/worker/task of its own
 (see msd.composition.load_components, which that task calls into) — and
 VAE's own auth repository (SRS DSM-VAE req 3).
 
@@ -32,14 +33,14 @@ from msd.ports.config_management_repository import IConfigManagementRepository
 from msd.ports.model_setup_data_catalog import IModelSetupDataCatalog
 from msd.ports.source_code_repository import ISourceCodeRepository
 
-from vae.adapters.in_memory_ldap_auth_repository import InMemoryLdapAuthRepository
-from vae.adapters.in_memory_task_output_store import InMemoryTaskOutputStore
+from vae.adapters.celery_task_runner import CeleryTaskRunner
+from vae.adapters.ldap_auth_repository import LdapAuthRepository
 from vae.adapters.redis_task_output_store import RedisTaskOutputStore
 from vae.config import DEFAULT_CONFIG_PATH, get_config
 from vae.ports.auth_repository import IAuthRepository
 from vae.ports.task_output_store import ITaskOutputStore
+from vae.ports.task_runner import ITaskRunner
 from vae.services.authenticate_user import AuthenticateUser
-from vae.task_runner import CeleryTaskRunner, ITaskRunner
 
 
 @dataclass
@@ -54,6 +55,12 @@ class Components:
     source_repo_factory: Callable[[DataSourceConfig], ISourceCodeRepository]
     msd_task_runner: ITaskRunner
     auth_repo: IAuthRepository
+    # Where a run's output lines are captured: the worker appends them while
+    # the task executes, the API's run stream reads them back. The two are
+    # separate processes, so they only meet through a store both can reach —
+    # in production the result-backend redis. No default: an API without one
+    # cannot serve the run stream at all.
+    task_output_store: ITaskOutputStore
     # Read side of msd's workspace: the Model Setup Data files earlier runs
     # produced. Needs no credentials — unlike the config-mgmt repository, it
     # reads this deployment's own artifacts, not a user's external data source
@@ -61,7 +68,6 @@ class Components:
     msd_catalog: IModelSetupDataCatalog = field(
         default_factory=lambda: FilesystemModelSetupDataCatalog(workspace_root())
     )
-    task_output_store: ITaskOutputStore = field(default_factory=InMemoryTaskOutputStore)
     connections: Dict[str, Dict[SourceType, DataSourceConfig]] = field(default_factory=dict)
 
     def authenticate_user(self) -> AuthenticateUser:
@@ -127,7 +133,7 @@ def load_components() -> Components:
         config_repo_factory=MysqlConfigManagementRepository.from_data_source_config,
         source_repo_factory=_build_source_repo,
         msd_task_runner=CeleryTaskRunner(),
-        auth_repo=InMemoryLdapAuthRepository(),
+        auth_repo=LdapAuthRepository(),
         msd_catalog=FilesystemModelSetupDataCatalog(workspace_root()),
         task_output_store=RedisTaskOutputStore(config.worker.result_backend),
     )

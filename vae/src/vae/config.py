@@ -55,7 +55,7 @@ def load_config(path: Path) -> Config:
     )
 
 
-@lru_cache(maxsize=1)
+@lru_cache
 def get_config() -> Config:
     return load_config(DEFAULT_CONFIG_PATH)
 

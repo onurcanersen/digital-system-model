@@ -26,7 +26,7 @@ from typing import Optional
 from msd.adapters.analysis.manual_source_analyzer import ManualSourceAnalyzer
 from msd.adapters.filesystem_model_setup_data_catalog import FilesystemModelSetupDataCatalog
 from msd.adapters.json_model_setup_data_writer import JsonModelSetupDataWriter
-from msd.adapters.source_code.make_build_runner import MakeBuildRunner
+from msd.adapters.source_code.gmake_build_runner import GmakeBuildRunner
 from msd.config import Config, get_config
 from msd.domain.validation import MandatoryFieldRule
 from msd.ports.config_management_repository import IConfigManagementRepository
@@ -69,7 +69,7 @@ class Components:
             source_repo=self.source_repo,
             analyze=AnalyzeSoftwareUnits(
                 ManualSourceAnalyzer(config.analyzer),
-                MakeBuildRunner(config.analyzer.makefile_include_patterns),
+                GmakeBuildRunner(config.analyzer.makefile_include_patterns),
                 run_build=config.analyzer.run_build,
             ),
             validate=ValidateMandatoryFields(list(_VALIDATION_RULES)),

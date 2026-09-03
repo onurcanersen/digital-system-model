@@ -1,5 +1,5 @@
 """Pure unit test for mandatory_file_catalog.py's Makefile content-pattern
-check (used by both git_source_code_repository.py and make_build_runner.py),
+check (used by both git_source_code_repository.py and gmake_build_runner.py),
 plus the git adapter's version listing — the set a candidate version is chosen
 from (SRS DSM-MSD req 11), whose git invocation is mocked at the subprocess
 boundary (real cloning stays manually verified, not automated)."""

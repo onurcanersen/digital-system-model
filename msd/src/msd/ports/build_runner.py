@@ -3,7 +3,7 @@
 Some DDS/pub-sub units generate their topic manifest and type-support code from
 an IDL-like definition at build time — without that step ISourceAnalyzer would
 have nothing to scan. The production implementation shells out to gmake
-(adapters/source_code/make_build_runner.py); tests inject a fake.
+(adapters/source_code/gmake_build_runner.py); tests inject a fake.
 """
 
 from __future__ import annotations

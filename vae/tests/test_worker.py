@@ -10,10 +10,11 @@ from unittest import mock
 
 from celery import Celery
 
+from fakes.fake_task_output_store import FakeTaskOutputStore
+
 from msd.domain.inventory import CandidateUnitVersion
 
 from vae import worker
-from vae.adapters.in_memory_task_output_store import InMemoryTaskOutputStore
 from vae.config import get_config
 
 
@@ -44,7 +45,7 @@ class _NullBackend:
 def _apply_task(components, tmp_path: Path, extra_args=()):
     with mock.patch("vae.worker.load_components", return_value=components), \
          mock.patch.object(Celery, "backend", new=property(lambda self: _NullBackend())), \
-         mock.patch("vae.worker._make_task_output_store", return_value=InMemoryTaskOutputStore()):
+         mock.patch("vae.worker._make_task_output_store", return_value=FakeTaskOutputStore()):
         return worker.run_msd_workflow.apply(
             args=[
                 "proj-1", "plat-1", "1.0.0",

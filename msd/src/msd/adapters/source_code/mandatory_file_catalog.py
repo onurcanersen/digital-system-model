@@ -8,7 +8,7 @@ that path genuinely differs per unit.
 
 Also the canonical home for "what counts as a valid Makefile" — both
 git_source_code_repository.py (req 15's existence+content check) and
-make_build_runner.py (deciding whether to run gmake regenerate_code) need it.
+gmake_build_runner.py (deciding whether to run gmake regenerate_code) need it.
 """
 
 from __future__ import annotations

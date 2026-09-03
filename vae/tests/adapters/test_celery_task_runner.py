@@ -4,7 +4,8 @@ from unittest import mock
 
 from celery import states
 
-from vae.task_runner import CeleryTaskRunner, TaskStatus
+from vae.adapters.celery_task_runner import CeleryTaskRunner
+from vae.domain.task_status import TaskStatus
 
 
 class _FakeAsyncResult:
@@ -16,14 +17,14 @@ class _FakeAsyncResult:
 
 def _status(state, result=None, task_id="t-1"):
     runner = CeleryTaskRunner()
-    with mock.patch("vae.task_runner.AsyncResult") as async_result_cls:
+    with mock.patch("vae.adapters.celery_task_runner.AsyncResult") as async_result_cls:
         async_result_cls.return_value = _FakeAsyncResult(state, result)
         return runner.status(task_id)
 
 
 def test_submit_run_delegates_to_celery_delay():
     runner = CeleryTaskRunner()
-    with mock.patch("vae.task_runner.run_msd_workflow") as task:
+    with mock.patch("vae.adapters.celery_task_runner.run_msd_workflow") as task:
         task.delay.return_value = _FakeAsyncResult(states.PENDING, task_id="abc")
         assert runner.submit_run(
             "proj-1", "plat-1", "1.0.0",
@@ -44,7 +45,7 @@ def test_submit_run_forwards_the_candidate_under_evaluation():
     since task arguments cross the broker as JSON."""
     runner = CeleryTaskRunner()
     candidate = {"unit_name": "sensor_app", "version": "1.0.3"}
-    with mock.patch("vae.task_runner.run_msd_workflow") as task:
+    with mock.patch("vae.adapters.celery_task_runner.run_msd_workflow") as task:
         task.delay.return_value = _FakeAsyncResult(states.PENDING, task_id="abc")
         runner.submit_run(
             "proj-1", "plat-1", "1.0.0",
@@ -58,7 +59,7 @@ def test_submit_run_forwards_the_candidate_under_evaluation():
 
 def test_cancel_revokes_with_terminate_and_reports_status():
     runner = CeleryTaskRunner()
-    with mock.patch("vae.task_runner.AsyncResult") as async_result_cls:
+    with mock.patch("vae.adapters.celery_task_runner.AsyncResult") as async_result_cls:
         async_result = async_result_cls.return_value
         async_result.state = states.REVOKED
         status = runner.cancel("t-1")

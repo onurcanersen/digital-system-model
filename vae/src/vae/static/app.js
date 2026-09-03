@@ -11,10 +11,16 @@
  *
  * Nothing is remembered in the browser except usernames, for prefill. What
  * survives a refresh lives on the server: Flask's session cookie holds
- * username/role/conn_token/selection, and the open connections live in
- * Components.connections under that token — so boot is a single GET
- * /api/session that decides which stage to resume at. A server restart drops
- * the in-memory connections, and the sources stage is entered again.
+ * username/role/conn_token/selection plus the UI record below, and the open
+ * connections live in Components.connections under that token — so boot is a
+ * single GET /api/session that decides which stage to resume at. A server
+ * restart drops the in-memory connections, and the sources stage is entered
+ * again.
+ *
+ * The UI record is where the user was standing: the card, the produced file
+ * the Model card was showing, and a candidate chosen but not yet run. This
+ * page has no addresses of its own — one card is shown at a time and nothing
+ * is in the URL — so that record is what a reload reads instead of a path.
  */
 (function () {
   "use strict";
@@ -23,6 +29,7 @@
     session: "/api/session",
     login: "/api/login",
     logout: "/api/logout",
+    ui: "/api/session/ui",
     selection: "/api/selection",
     projects: "/api/projects",
     units: "/api/units/",
@@ -151,16 +158,10 @@
     "model"
   ];
 
-  // Views that show the signed-in footer, and those that widen the card.
+  // Views that show the signed-in footer. Card width is not listed here: the
+  // stylesheet reads the data-view attribute set below and picks one of its
+  // three steps from it.
   var WITH_SESSIONBAR = {
-    sources: true,
-    select: true,
-    inventory: true,
-    files: true,
-    run: true,
-    model: true
-  };
-  var WIDE = {
     sources: true,
     select: true,
     inventory: true,
@@ -188,6 +189,14 @@
     // Per source key: does the server hold that connection for this session.
     sources: {},
     selection: null,
+    // Every version the current project/platform publishes, as the database
+    // returned them — the raw rows behind the version picker, which the
+    // context strip reads for the plain label and the effective-version flag.
+    versions: null,
+    // Where the user was standing, as the server last recorded it —
+    // {view, model_file, candidate}. Read once on boot to choose the card to
+    // resume on; `rememberUi` keeps the server's copy in step after that.
+    ui: null,
     // The run this session is tracking, as the server last described it —
     // {task_id, project_id, platform_id, version_id, submitted_at} — so a
     // reload re-attaches to a run already in flight.
@@ -263,16 +272,19 @@
   /* --------------------------------------------------------------- views */
 
   function showView(name) {
+    // The card being left still has its scroll position; a hidden one does
+    // not, so it is taken here rather than after the switch.
+    if (state.view === "inventory" && name !== "inventory") {
+      keepInventoryScroll();
+    }
     state.view = name;
     VIEWS.forEach(function (view) {
       $("view-" + view).hidden = view !== name;
     });
     renderHeader(HEADERS[name]);
     renderStepper(name);
-    // Lets the shared header above the views be tuned per view — the pickers
-    // carry their own labels, so they need less room under the subtitle.
+    // What the stylesheet keys the card's width and content floor off.
     el.card.setAttribute("data-view", name);
-    el.card.classList.toggle("card--wide", !!WIDE[name]);
     // The run card is sized by the viewport rather than by its content: the
     // shell widens to it and stops height-centring, so the console below can
     // take every row the chrome does not.
@@ -290,6 +302,9 @@
     if (focusTarget && !focusTarget.disabled) {
       focusTarget.focus();
     }
+    // Every card change passes through here, and so does every change of the
+    // file on show — openFile ends on the model card.
+    rememberUi();
   }
 
   function renderStepper(name) {
@@ -414,12 +429,14 @@
     state.activeTask = tracks(session.active_task, state.selection)
       ? session.active_task
       : null;
+    state.ui = session.ui || null;
     // A reload lands on the run already in flight, so the candidate it is
-    // evaluating comes back with it (SRS DSM-MSD req 11); otherwise the
-    // choice was never submitted and there is nothing to restore.
+    // evaluating comes back with it (SRS DSM-MSD req 11) — a submitted run is
+    // the authority on what it is evaluating, over anything chosen since.
+    // Failing that, the choice the user had made but not yet run.
     state.candidate = state.activeTask
       ? state.activeTask.candidate || null
-      : null;
+      : (state.ui && state.ui.candidate) || null;
   }
 
   function tracks(task, selection) {
@@ -438,13 +455,47 @@
       state.sources[source.key] = false;
     });
     state.selection = null;
+    state.versions = null;
     state.activeTask = null;
-    state.candidate = null;
+    state.ui = null;
     candidateVersions = {};
-    state.files = null;
-    state.modelFile = null;
-    state.model = null;
+    forgetContext();
+    // The next sign-in starts a session of its own: nothing this one told the
+    // server about where it stood applies to it.
+    lastUi = null;
     closeRunStream();
+  }
+
+  /* The UI record as the server last heard it, so an unchanged one is not
+   * re-sent — every card change goes through showView, and most of them say
+   * nothing new. */
+  var lastUi = null;
+
+  /* Tell the server where the user is standing, so a reload can put them back
+   * (SRS DSM-VAE req 5: the file selected for use survives with it). Sent and
+   * forgotten: this is bookkeeping alongside the navigation, never a step in
+   * it, so a failed write leaves the UI exactly where the user put it and
+   * costs at most a stale resume. A 401 is the one answer worth acting on,
+   * and handleExpired takes the session back to sign-in. */
+  function rememberUi() {
+    if (state.view === "boot" || state.view === "login") {
+      return;
+    }
+    var record = {
+      view: state.view,
+      model_file: state.modelFile ? state.modelFile.run_id : null,
+      candidate: state.candidate || null
+    };
+    var sent = JSON.stringify(record);
+    if (sent === lastUi) {
+      return;
+    }
+    lastUi = sent;
+    request("POST", API.ui, record).catch(function (error) {
+      // Say it again next time rather than trusting a write that failed.
+      lastUi = null;
+      handleExpired(error);
+    });
   }
 
   function allConnected() {
@@ -557,7 +608,7 @@
     modalSource = source;
     modalOpener = opener || null;
     setMessage("modal", null, "");
-    el.modalIcon.className = "lucide " + source.icon + " modal__icon";
+    el.modalIcon.className = "lucide " + source.icon + " brand-icon";
     el.modalTitle.textContent = source.title;
     el.sourceAddress.value = (state.defaults && state.defaults[source.key]) || "";
     el.sourceUsername.value = "";
@@ -661,13 +712,7 @@
           // The server drops any saved selection when a new config-mgmt-DB
           // connection is opened, since it may point at a different database.
           state.selection = null;
-          // The produced files and the one on show belonged to that
-          // selection, so they go with it.
-          state.files = null;
-          state.modelFile = null;
-          state.model = null;
-          // The candidate named a unit of the selection just dropped.
-          state.candidate = null;
+          forgetContext();
         } else {
           // A new source repository may publish different versions, so what
           // the last one reported is no longer an answer about this one.
@@ -709,30 +754,53 @@
 
   /* ------------------------------------------------------------- context */
 
-  // Land on the right context step after a refresh: straight to the
-  // inventory when the server still holds a selection, otherwise the pickers.
-  function resumeContext() {
+  /* Fill the pickers, putting the saved selection back into them. Resolves
+   * true when the pickers now hold it — which is what lets the cards past the
+   * context step be entered, whether that is a reload deciding where to land
+   * or the user stepping back here.
+   *
+   * A selection that no longer resolves is dropped on the server too: it
+   * describes a context the database has stopped offering, and left in place
+   * it would fail this same way on every reload. */
+  function fillSelect() {
     var saved = state.selection;
     return loadProjects()
       .then(function () {
         if (!saved) {
-          showView("select");
-          return null;
+          return false;
         }
         return restoreSelection(saved).then(function (complete) {
           if (complete) {
-            // A run still being tracked outranks the inventory: it is the
-            // thing that was happening when the page went away.
-            return state.activeTask ? enterRunConsole() : enterInventory();
+            return true;
           }
-          showView("select");
+          state.selection = null;
+          forgetContext();
           setMessage(
             "select",
             "error",
             "The saved context is no longer available. Pick it again."
           );
-          return null;
+          return request("DELETE", API.selection)
+            .catch(function () {
+              // Saying so is what mattered; the server will offer it again.
+            })
+            .then(function () {
+              return false;
+            });
         });
+      });
+  }
+
+  // Land on the right card after a refresh: where the user was standing, as
+  // far as the selection behind it still resolves.
+  function resumeContext() {
+    return fillSelect()
+      .then(function (complete) {
+        if (!complete) {
+          showView("select");
+          return null;
+        }
+        return resumeCard();
       })
       .catch(function (error) {
         if (handleExpired(error)) {
@@ -743,8 +811,60 @@
       });
   }
 
+  /* The card the session says the user was on, when the state behind it is
+   * still there to show. The produced file the model card wants is looked up
+   * in the listing rather than trusted from the record — it is a file on
+   * disk, and another selection's run may have been cleaned up since. */
+  function resumeCard() {
+    var saved = state.ui || {};
+    // Standing on one of the earlier cards with a context already confirmed
+    // is a place to be, not a step left unfinished: the sources are there to
+    // be reconnected and the pickers to be changed. Both are ready to use —
+    // the sources card reads state the session carries, and the pickers were
+    // just filled.
+    if (saved.view === "sources") {
+      return enterSources();
+    }
+    if (saved.view === "select") {
+      return showView("select");
+    }
+    if (saved.view === "model" && saved.model_file) {
+      return loadFiles().then(function () {
+        state.modelFile = fileByRun(saved.model_file);
+        if (state.modelFile) {
+          return enterModel();
+        }
+        return resumeRunOrInventory();
+      });
+    }
+    if (saved.view === "files") {
+      return enterFiles();
+    }
+    return resumeRunOrInventory();
+  }
+
+  // A run still being tracked outranks the inventory: it is the thing that
+  // was happening when the page went away.
+  function resumeRunOrInventory() {
+    return state.activeTask ? enterRunConsole() : enterInventory();
+  }
+
+  function fileByRun(runId) {
+    var files = state.files || [];
+    for (var i = 0; i < files.length; i++) {
+      if (files[i].run_id === runId) {
+        return files[i];
+      }
+    }
+    return null;
+  }
+
+  /* Stepping back to the pickers. They are refilled from the database and the
+   * saved selection put back into them, so this card reads the same however
+   * it was reached — arriving from the sources card is not a reason to show
+   * an empty context while the stepper still offers the cards past it. */
   function enterSelect() {
-    return loadProjects()
+    return fillSelect()
       .then(function () {
         showView("select");
       })
@@ -900,16 +1020,27 @@
   // Every unit the database returned for this context. The filter narrows
   // what is drawn from here, so typing never costs a request.
   var allUnits = null;
+  // Where the list was scrolled to when this card was last left. Stepping to
+  // the produce card to look something up and coming back is one movement to
+  // the user, so it should not cost them their place in the list.
+  var unitScroll = 0;
 
   function enterInventory() {
     setMessage("inventory", null, "");
     renderContextLine();
-    el.unitFilter.value = "";
-    renderUnits(null);
+    // The filter and the list already in hand are kept: what is re-read is
+    // the inventory itself, which the card then swaps in underneath them.
+    // Only a change of context clears them (they describe the one left
+    // behind), and forgetInventory is what does that.
+    renderUnits(allUnits);
     drawCandidateControl();
     showView("inventory");
+    restoreInventoryScroll();
     return loadUnits()
-      .then(drawCandidateControl)
+      .then(function () {
+        drawCandidateControl();
+        restoreInventoryScroll();
+      })
       .catch(function (error) {
         if (handleExpired(error)) {
           return;
@@ -918,6 +1049,36 @@
         drawCandidateControl();
         setMessage("inventory", "error", error.message);
       });
+  }
+
+  function keepInventoryScroll() {
+    unitScroll = el.unitList.scrollTop;
+  }
+
+  function restoreInventoryScroll() {
+    el.unitList.scrollTop = unitScroll;
+  }
+
+  // What the inventory card holds belongs to one context: a different one has
+  // its own units, and a filter written against the old list means nothing
+  // against the new.
+  function forgetInventory() {
+    allUnits = null;
+    unitScroll = 0;
+    el.unitFilter.value = "";
+  }
+
+  /* Everything held here that described one selection — the produced files
+   * and the one on show, the candidate naming a unit of its inventory, and
+   * the inventory card itself. Dropped together whenever the context changes
+   * or goes away; the selection itself is the caller's to set, since it is
+   * being replaced in some of those cases and cleared in others. */
+  function forgetContext() {
+    state.files = null;
+    state.modelFile = null;
+    state.model = null;
+    state.candidate = null;
+    forgetInventory();
   }
 
   function loadUnits() {
@@ -1126,7 +1287,10 @@
     }
 
     el.candidateUnit.textContent = "";
-    el.candidateUnit.appendChild(option("", "Nothing"));
+    // The same dash the version picker shows when unset, so with no unit
+    // chosen the line reads as one unset pair rather than as a sentence
+    // about evaluating nothing.
+    el.candidateUnit.appendChild(option("", "—"));
     units.forEach(function (unit) {
       el.candidateUnit.appendChild(option(unit.unit_name, unit.unit_name));
     });
@@ -1209,7 +1373,7 @@
     // A candidate the repository no longer publishes still belongs in the
     // list — it is what the user chose, and dropping it silently would
     // change their run without saying so.
-    if (candidate && !hasOption(candidate.version)) {
+    if (candidate && !hasCandidateVersion(candidate.version)) {
       el.candidateVersion.appendChild(option(candidate.version, candidate.version));
     }
 
@@ -1222,14 +1386,8 @@
     );
   }
 
-  function hasOption(value) {
-    var options = el.candidateVersion.options;
-    for (var i = 0; i < options.length; i++) {
-      if (options[i].value === value) {
-        return true;
-      }
-    }
-    return false;
+  function hasCandidateVersion(value) {
+    return hasOption(el.candidateVersion, value);
   }
 
   function onCandidateUnitChange() {
@@ -1238,6 +1396,9 @@
     if (!state.candidate || state.candidate.unit_name !== unitName) {
       state.candidate = null;
       paintUnits();
+      // The candidate is the one thing chosen on this card that a reload has
+      // to come back to, and it changes without a change of card.
+      rememberUi();
     }
     if (!unitName) {
       clearVersionPicker();
@@ -1256,6 +1417,7 @@
         ? { unit_name: unitName, version: version }
         : null;
     paintUnits();
+    rememberUi();
   }
 
   /* ----------------------------------------------------------------- run */
@@ -1309,15 +1471,31 @@
   }
 
   function enterFiles() {
-    // Reachable while a run is going, by stepping back off the console. This
-    // session tracks one run at a time, so starting a second here would
-    // orphan the first — the card says so rather than silently doing it.
-    var live = !!state.activeTask && !RUN_TERMINAL[runState];
-    el.filesProduce.disabled = live;
+    /* Reachable while a run is going, by stepping back off the console. This
+     * session tracks one run at a time, so starting a second here would
+     * orphan the first — the card says so rather than silently doing it.
+     *
+     * A reload can land here holding a tracked run this page has never
+     * attached to, and how that run ended is only on its stream: until it is
+     * opened the run is neither known to be going nor known to be over. So
+     * the card says which of the two it is telling the user, and the way to
+     * settle it is the button beside Produce. */
+    var tracked = !!state.activeTask;
+    var live = tracked && runState !== null && !RUN_TERMINAL[runState];
+    var unattached = tracked && runState === null;
+    el.filesProduce.disabled = live || unattached;
+    // The way back into the run this session is tracking, going or finished.
+    // A finished one is not on offer anywhere else: its file is in the list
+    // like any other, but the log of how it was produced is only here.
+    el.filesLog.hidden = !tracked;
     setMessage(
       "files",
       null,
-      live ? "A production run is already in progress." : ""
+      live
+        ? "A production run is already in progress."
+        : unattached
+        ? "This session is tracking a production run. Open its log to see where it got to."
+        : ""
     );
     showView("files");
     loadFiles();
@@ -1485,6 +1663,9 @@
       showView("run");
       startRun();
     });
+    // Back into the tracked run, replaying its lines from the store — the
+    // same thing a reload does, so stepping away costs nothing.
+    el.filesLog.addEventListener("click", enterRunConsole);
     el.runBack.addEventListener("click", enterFiles);
     // Start survives on the console only as a retry after a run that failed
     // or was cancelled — the first submit comes from the files card.
@@ -1734,8 +1915,10 @@
         : null;
       state.model = null;
       // The run ends while this card is already on screen, so the stage it
-      // just unlocked has to be redrawn rather than waiting for a view change.
+      // just unlocked has to be redrawn — and the file it just made recorded —
+      // rather than waiting for a view change.
       renderStepper(state.view);
+      rememberUi();
     }
     if (ready) {
       // The run just added a file to this selection's list, and the card
@@ -1966,8 +2149,15 @@
     });
   }
 
-  // What was read to build the model: one row per file the run went for,
-  // with the status it came back with. What went wrong is next door.
+  /* What was read to build the model: one row per file the run went for,
+   * with the status it came back with, under a heading for the unit it was
+   * read from. What went wrong is next door.
+   *
+   * The generator walks the inventory unit by unit, so the records already
+   * arrive in runs that share a unit and a version. Heading a run says the
+   * pair once where a line under every file said it once per row — and the
+   * rows themselves then have the width to be read. Nothing is reordered
+   * here: a run ends where the file's own order ends it. */
   function renderModelLog(model) {
     var files = model.acquired_files || [];
     setPanelCount(el.modelLogCount, files.length);
@@ -1976,26 +2166,64 @@
       return;
     }
     el.modelLog.textContent = "";
+    var group = null;
+    var heading = null;
     files.forEach(function (file) {
-      var built = modelRow(el.modelLog);
-      built.head.appendChild(dot(file.status));
-      built.head.appendChild(span("mrow__name", shown(file.file_name)));
-      built.head.appendChild(chip(words(file.status), file.status));
-
-      var line = detailLine(built.row);
-      line.appendChild(
-        document.createTextNode(
-          shown(file.unit_name) + " · " + shown(file.package_version)
-        )
-      );
-      // A file that could not be read says why on its own row: what went
-      // wrong reaching it belongs to the file, not to the validation the
-      // panel next door reports.
-      (file.errors || []).forEach(function (error) {
-        line.appendChild(chip(words(error.error_type), "ERROR"));
-        line.appendChild(document.createTextNode(shown(error.message)));
-      });
+      // A run acquires one version of a unit, so either half of the pair
+      // changing is a new unit as far as the log is concerned.
+      var key = shown(file.unit_name) + " " + shown(file.package_version);
+      if (key !== heading) {
+        heading = key;
+        group = logGroup(file);
+      }
+      logRow(group, file);
     });
+  }
+
+  function logGroup(file) {
+    var group = document.createElement("div");
+    group.className = "mgroup";
+    var head = document.createElement("div");
+    head.className = "mgroup__head";
+    head.appendChild(span("mgroup__name", shown(file.unit_name)));
+    head.appendChild(span("mgroup__version", shown(file.package_version)));
+    group.appendChild(head);
+    el.modelLog.appendChild(group);
+    return group;
+  }
+
+  function logRow(group, file) {
+    var built = modelRow(group);
+    // Colour alone is not a status: the dot names itself on hover, and a file
+    // that did not come through says so in words beside it. A row that did is
+    // left to the dot — every row carrying an OK chip made the exceptions
+    // harder to find, not easier.
+    built.head.appendChild(dot(file.status, words(file.status)));
+    var name = span("mrow__name", shown(file.file_name));
+    // Where it was read from. Held back to the tooltip because the writer
+    // records an absolute path on the worker's disk, which is longer than the
+    // row and means nothing on the reader's machine.
+    name.title = file.file_path || shown(file.file_name);
+    built.head.appendChild(name);
+    if (String(file.status).toUpperCase() !== "OK") {
+      built.head.appendChild(chip(words(file.status), file.status));
+    }
+    // A file that could not be read says why under itself: what went wrong
+    // reaching it belongs to the file, not to the validation the panel next
+    // door reports. All of a row's reasons go into one grid rather than a
+    // box each, so their kinds and their messages line up in two columns
+    // however many there are and however wide the widest kind is.
+    var errors = file.errors || [];
+    if (!errors.length) {
+      return;
+    }
+    var reasons = document.createElement("div");
+    reasons.className = "mreasons";
+    errors.forEach(function (error) {
+      reasons.appendChild(chip(words(error.error_type), "ERROR"));
+      reasons.appendChild(span("mreasons__text", shown(error.message)));
+    });
+    built.row.appendChild(reasons);
   }
 
   /* What the run rejected the model's own sources over — the file's
@@ -2007,7 +2235,14 @@
     var errors = model.validation_errors || [];
     setPanelCount(el.modelErrorCount, errors.length);
     if (!errors.length) {
-      emptyPanel(el.modelErrors, "No validation errors for this model.");
+      // Nothing to report is the good outcome here, unlike an empty
+      // inventory or an empty log, so it is drawn as a verdict rather than
+      // as the plain missing-content line those two get.
+      clearPanel(
+        el.modelErrors,
+        "No Validation Errors",
+        "Every source this model was built from passed validation."
+      );
       return;
     }
     el.modelErrors.textContent = "";
@@ -2060,18 +2295,41 @@
     return node;
   }
 
-  function dot(level) {
+  function dot(level, title) {
     var node = span("dot", "");
     node.setAttribute("data-level", String(level || "").toLowerCase());
+    if (title) {
+      node.title = title;
+    }
     return node;
   }
 
   function emptyPanel(host, text) {
     host.textContent = "";
-    var note = document.createElement("p");
-    note.className = "units__empty";
-    note.textContent = text;
-    host.appendChild(note);
+    host.appendChild(note("units__empty", text));
+  }
+
+  // A panel that is empty because the run found nothing to put in it, which
+  // is what a good run looks like: the seal, the verdict, and what it covers.
+  function clearPanel(host, title, text) {
+    host.textContent = "";
+    var box = document.createElement("div");
+    box.className = "mclear";
+    var seal = span("mclear__seal", "");
+    var glyph = document.createElement("i");
+    glyph.className = "lucide lucide-circle-check";
+    seal.appendChild(glyph);
+    box.appendChild(seal);
+    box.appendChild(note("mclear__title", title));
+    box.appendChild(note("mclear__note", text));
+    host.appendChild(box);
+  }
+
+  function note(className, text) {
+    var node = document.createElement("p");
+    node.className = className;
+    node.textContent = text;
+    return node;
   }
 
   function setPanelCount(node, count) {
@@ -2250,7 +2508,7 @@
     el.selectForm.addEventListener("submit", function (event) {
       event.preventDefault();
       setMessage("select", null, "");
-      setBusy(el.selectSubmit, true, "Saving", "Confirm context");
+      setBusy(el.selectSubmit, true, "Saving", "Continue");
       request("POST", API.selection, {
         project_id: el.project.value,
         platform_id: el.platform.value,
@@ -2260,22 +2518,19 @@
           var changed = !tracks(state.selection, payload.selection);
           state.selection = payload.selection;
           if (changed) {
-            // Produced files are per selection; a different one lists its own.
-            state.files = null;
-            state.modelFile = null;
-            state.model = null;
-            // The candidate named a unit of the inventory just left behind.
-            state.candidate = null;
+            // Produced files, the candidate and the inventory card all
+            // described the context just left behind.
+            forgetContext();
           }
           if (!tracks(state.activeTask, state.selection)) {
             state.activeTask = null;
             closeRunStream();
           }
-          setBusy(el.selectSubmit, false, "Saving", "Confirm context");
+          setBusy(el.selectSubmit, false, "Saving", "Continue");
           enterInventory();
         })
         .catch(function (error) {
-          setBusy(el.selectSubmit, false, "Saving", "Confirm context");
+          setBusy(el.selectSubmit, false, "Saving", "Continue");
           if (!handleExpired(error)) {
             setMessage("select", "error", error.message);
           }
@@ -2359,6 +2614,7 @@
     el.runFiles = $("run-files");
     el.runFilesEmpty = $("run-files-empty");
     el.filesProduce = $("files-produce");
+    el.filesLog = $("files-log");
 
     el.modelContext = $("model-context");
     el.modelProject = $("model-project");
