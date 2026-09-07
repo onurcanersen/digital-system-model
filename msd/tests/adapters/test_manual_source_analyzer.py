@@ -11,9 +11,9 @@ come from an explicitly constructed AnalyzerConfig.
 
 from pathlib import Path
 
-from adapters.analysis.manual_source_analyzer import ManualSourceAnalyzer
-from config import AnalyzerConfig
-from domain.extracted_topic import TopicRole
+from msd.adapters.analysis.manual_source_analyzer import ManualSourceAnalyzer
+from msd.config import AnalyzerConfig
+from msd.domain.extracted_topic import TopicRole
 
 
 def _analyzer(**kwargs) -> ManualSourceAnalyzer:

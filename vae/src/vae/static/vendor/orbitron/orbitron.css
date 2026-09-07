@@ -1,0 +1,33 @@
+/* Static per-weight faces, not the variable orbitron.woff2.
+   Firefox < 100 does not instance a variable font from a single-value
+   font-weight descriptor, so a face declared `font-weight: 700` on the
+   variable file renders at its 400 default there. Real static files keep
+   bold weights working on those builds. */
+@font-face {
+  font-family: 'Orbitron';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(orbitron-400.woff) format('woff');
+}
+@font-face {
+  font-family: 'Orbitron';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(orbitron-500.woff) format('woff');
+}
+@font-face {
+  font-family: 'Orbitron';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(orbitron-600.woff) format('woff');
+}
+@font-face {
+  font-family: 'Orbitron';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(orbitron-700.woff) format('woff');
+}

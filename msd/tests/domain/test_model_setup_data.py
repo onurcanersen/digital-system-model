@@ -1,9 +1,9 @@
 from datetime import datetime
 
-from domain.acquired_file import AcquiredFile
-from domain.inventory import SoftwareUnitVersion, SoftwareUnitVersionInventory
-from domain.model_setup_data import ModelSetupData, ModelSetupDataTopic
-from domain.project_context import ProjectContext, PlatformRecord, ProjectRecord, VersionRecord
+from msd.domain.acquired_file import AcquiredFile
+from msd.domain.inventory import SoftwareUnitVersion, SoftwareUnitVersionInventory
+from msd.domain.model_setup_data import ModelSetupData, ModelSetupDataTopic
+from msd.domain.project_context import ProjectContext, PlatformRecord, ProjectRecord, VersionRecord
 
 
 def _context() -> ProjectContext:

@@ -4,8 +4,8 @@ ConfigManagementAccessError, never as raw pymysql exceptions."""
 
 import pymysql
 
-from adapters.mysql_config_management_repository import MysqlConfigManagementRepository
-from ports.config_management_repository import ConfigManagementAccessError
+from msd.adapters.mysql_config_management_repository import MysqlConfigManagementRepository
+from msd.ports.config_management_repository import ConfigManagementAccessError
 
 
 def _repo() -> MysqlConfigManagementRepository:

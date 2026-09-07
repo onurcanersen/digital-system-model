@@ -219,3 +219,6 @@ __marimo__/
 
 # Workspace
 workspace/
+
+# macOS
+.DS_Store

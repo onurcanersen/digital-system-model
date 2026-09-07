@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Digital System Model</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='vendor/orbitron/orbitron.css') }}"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='vendor/barlow/barlow.css') }}"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='vendor/lucide/lucide.css') }}"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='app.css') }}"
+    />
+    <link
+      rel="icon"
+      href="{{ url_for('static', filename='favicon.ico') }}"
+      sizes="any"
+    />
+  </head>
+  <body>
+    <div class="sessionbar" id="sessionbar" hidden>
+      <i class="lucide lucide-circle-user"></i>
+      <span class="sessionbar__user" id="sessionbar-user"></span>
+      <span class="sessionbar__divider"></span>
+      <button
+        type="button"
+        class="linkbtn"
+        data-signout
+        title="Sign out"
+        aria-label="Sign out"
+      >
+        <i class="lucide lucide-log-out"></i>
+      </button>
+    </div>
+
+    <div class="shell" id="shell">
+      <ol class="stepper" id="stepper" hidden>
+        <li class="stepper__item" id="stepper-sources" data-state="todo">
+          <button type="button" class="stepper__button" data-stage="sources">
+            <span class="stepper__mark">
+              <i class="lucide lucide-check"></i>
+              <span class="stepper__num">1</span>
+            </span>
+            <span class="stepper__name">Sources</span>
+          </button>
+        </li>
+        <li class="stepper__item" id="stepper-select" data-state="todo">
+          <button type="button" class="stepper__button" data-stage="select">
+            <span class="stepper__mark">
+              <i class="lucide lucide-check"></i>
+              <span class="stepper__num">2</span>
+            </span>
+            <span class="stepper__name">Context</span>
+          </button>
+        </li>
+        <li class="stepper__item" id="stepper-inventory" data-state="todo">
+          <button type="button" class="stepper__button" data-stage="inventory">
+            <span class="stepper__mark">
+              <i class="lucide lucide-check"></i>
+              <span class="stepper__num">3</span>
+            </span>
+            <span class="stepper__name">Inventory</span>
+          </button>
+        </li>
+        <li class="stepper__item" id="stepper-run" data-state="todo">
+          <button type="button" class="stepper__button" data-stage="run">
+            <span class="stepper__mark">
+              <i class="lucide lucide-check"></i>
+              <span class="stepper__num">4</span>
+            </span>
+            <span class="stepper__name">Produce</span>
+          </button>
+        </li>
+        <li class="stepper__item" id="stepper-model" data-state="todo">
+          <button type="button" class="stepper__button" data-stage="model">
+            <span class="stepper__mark">
+              <i class="lucide lucide-check"></i>
+              <span class="stepper__num">5</span>
+            </span>
+            <span class="stepper__name">Model</span>
+          </button>
+        </li>
+      </ol>
+
+      <!-- The view the markup opens on, named here too: boot is the one view
+           script never calls showView for, so without it the card's first
+           paint would take the default width and then jump to sign-in's. -->
+      <main class="card" id="card" data-view="boot">
+        <div class="card__blur"></div>
+        <div class="card__corners"></div>
+
+        <div class="card__body">
+          <h1 class="title" id="title">Digital System Model</h1>
+          <img
+            class="logo"
+            id="logo"
+            src="{{ url_for('static', filename='logo.png') }}"
+            alt=""
+            width="171"
+            height="192"
+            hidden
+          />
+          <i class="lucide lucide-database brand-icon" id="brand-icon" hidden></i>
+          <p class="subtitle" id="subtitle">Secure Access</p>
+
+          <!-- Boot: held until GET /api/session says which step we resume at. -->
+          <section class="view" id="view-boot">
+            <p class="boot"><span class="spinner"></span>Restoring session</p>
+          </section>
+
+          <section class="view" id="view-login" hidden>
+            <form id="login-form" novalidate>
+              <label class="field">
+                <i class="lucide lucide-user"></i>
+                <input
+                  id="username"
+                  name="username"
+                  type="text"
+                  placeholder="USERNAME"
+                  autocomplete="username"
+                  aria-describedby="login-message"
+                  autocapitalize="none"
+                  spellcheck="false"
+                  required
+                />
+              </label>
+
+              <label class="field">
+                <i class="lucide lucide-key"></i>
+                <input
+                  id="password"
+                  name="password"
+                  type="password"
+                  placeholder="PASSWORD"
+                  autocomplete="current-password"
+                  aria-describedby="login-message"
+                  required
+                />
+                <button
+                  type="button"
+                  class="reveal"
+                  data-reveal="password"
+                  aria-label="Show password"
+                >
+                  <i class="lucide lucide-eye-off"></i>
+                </button>
+              </label>
+
+              <p class="message" id="login-message" role="alert"></p>
+
+              <div class="actions">
+                <button type="submit" class="submit" id="login-submit">
+                  <span class="submit__label">Authenticate</span
+                  ><i class="lucide lucide-arrow-right submit__arrow"></i>
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <!-- Data sources: one tile per source this session must hold a
+               connection to. Each tile opens the connection modal; the line
+               under it says whether the server currently holds that
+               connection. Credentials are the source's own, not the sign-in
+               ones, and are asked once — the connection then lives on the
+               server for the rest of the session. -->
+          <section class="view" id="view-sources" hidden>
+            <div class="sources" id="sources-grid"></div>
+
+            <p class="message" id="sources-message" role="alert"></p>
+
+            <div class="actions">
+              <button type="button" class="submit" id="sources-submit" disabled>
+                <span class="submit__label">Continue</span
+                ><i class="lucide lucide-arrow-right submit__arrow"></i>
+              </button>
+            </div>
+          </section>
+
+          <section class="view" id="view-select" hidden>
+            <form id="select-form" novalidate>
+              <div class="picker" id="picker-project">
+                <label class="label" for="project">Project</label>
+                <div class="picker__control">
+                  <select id="project"></select>
+                  <i class="lucide lucide-chevron-down"></i>
+                </div>
+              </div>
+
+              <div class="picker picker--disabled" id="picker-platform">
+                <label class="label" for="platform">Platform</label>
+                <div class="picker__control">
+                  <select id="platform" disabled></select>
+                  <i class="lucide lucide-chevron-down"></i>
+                </div>
+              </div>
+
+              <div class="picker picker--disabled" id="picker-version">
+                <label class="label" for="version">System version</label>
+                <div class="picker__control">
+                  <select id="version" disabled></select>
+                  <i class="lucide lucide-chevron-down"></i>
+                </div>
+              </div>
+
+              <p class="message" id="select-message" role="alert"></p>
+
+              <div class="actions">
+                <button type="submit" class="submit" id="select-submit" disabled>
+                  <span class="submit__label">Continue</span
+                  ><i class="lucide lucide-arrow-right submit__arrow"></i>
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <!-- Software Unit Version Inventory (SRS DSM-MSD req 10): the
+               units that run in the confirmed project/platform/version, and
+               the version of each, read from the configuration management
+               database. -->
+          <section class="view" id="view-inventory" hidden>
+            <!-- The keys stay in the markup for assistive tech, which reads
+                 "Project skywatch"; on screen the three cells and their
+                 order carry the same meaning in a single line. -->
+            <div class="context">
+              <div class="context__cell" title="Project">
+                <span class="context__key">Project</span>
+                <span class="context__value" id="context-project"></span>
+              </div>
+              <div class="context__cell" title="Platform">
+                <span class="context__key">Platform</span>
+                <span class="context__value" id="context-platform"></span>
+              </div>
+              <div class="context__cell" title="System version">
+                <span class="context__key">Version</span>
+                <span class="context__value" id="context-version"></span
+                ><span class="context__flag" id="context-current" hidden>
+                  &middot; Current</span
+                >
+              </div>
+            </div>
+
+            <!-- Filter and list share one box: the filter belongs to the
+                 list it narrows, and the count belongs to both. -->
+            <div class="units">
+              <label class="units__search">
+                <i class="lucide lucide-search"></i>
+                <input
+                  id="unit-filter"
+                  type="text"
+                  placeholder="FILTER UNITS"
+                  aria-label="Filter software units"
+                  aria-controls="unit-list"
+                  autocomplete="off"
+                  autocapitalize="none"
+                  spellcheck="false"
+                />
+                <span class="units__count" id="unit-count"></span>
+              </label>
+
+              <div class="units__list" id="unit-list"></div>
+
+              <!-- The candidate version being evaluated for installation into
+                   the target environment (SRS DSM-MSD req 11), as the box's
+                   last row: it rewrites one row of the list above, so it
+                   belongs inside the same frame rather than floating under
+                   it. A run evaluates at most one unit, so it reads as one
+                   line — "evaluate <unit> at <version>" — rather than a
+                   block of stacked pickers. Leaving the unit unset runs the
+                   versions this system version defines. -->
+              <div class="units__candidate">
+                <span class="units__candidate-key">Evaluate</span>
+                <div class="picker picker--inline">
+                  <div class="picker__control">
+                    <select
+                      id="candidate-unit"
+                      aria-label="Software unit to evaluate"
+                      disabled
+                    ></select>
+                    <i class="lucide lucide-chevron-down"></i>
+                  </div>
+                </div>
+                <span class="units__candidate-key">at</span>
+                <div
+                  class="picker picker--inline picker--disabled"
+                  id="picker-candidate-version"
+                >
+                  <div class="picker__control">
+                    <select
+                      id="candidate-version"
+                      aria-label="Candidate version"
+                      disabled
+                    ></select>
+                    <i class="lucide lucide-chevron-down"></i>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <p class="candidate__note" id="candidate-note" role="status"></p>
+            <p class="message" id="inventory-message" role="alert"></p>
+
+            <div class="actions">
+              <button type="button" class="submit" id="inventory-next">
+                <span class="submit__label">Produce data</span
+                ><i class="lucide lucide-arrow-right submit__arrow"></i>
+              </button>
+            </div>
+          </section>
+
+          <!-- The Model Setup Data files already produced for the selected
+               project, platform and system version, and the choice of which
+               to use (SRS DSM-VAE req 5). The Produce stage opens here rather
+               than on the console: an existing file is offered before a run
+               is spent making another. Every producer's files, not just this
+               user's — a file belongs to the selection it describes, and each
+               row names who produced it. -->
+          <section class="view" id="view-files" hidden>
+            <!-- Hidden until the list has actually been read, so the card
+                 never claims there are none while the request is still out. -->
+            <div class="files" id="run-files-panel" hidden>
+              <span class="files__label"
+                ><i class="lucide lucide-hard-drive"></i>Previously produced</span
+              >
+              <ul class="files__list" id="run-files"></ul>
+              <p class="files__empty" id="run-files-empty" hidden>
+                No Model Setup Data produced for this context yet.
+              </p>
+            </div>
+
+            <p class="message" id="files-message" role="alert"></p>
+
+            <!-- Producing is the decision this card leads to, so its button
+                 submits and hands over to the console rather than opening an
+                 idle card with a second button meaning the same thing. Beside
+                 it, the way back into the run this session is tracking —
+                 without it a finished run's log would be reachable by
+                 reloading the page and no other way. -->
+            <div class="actions">
+              <div class="actions__row">
+                <button
+                  type="button"
+                  class="submit submit--ghost submit--compact"
+                  id="files-log"
+                  hidden
+                >
+                  <i class="lucide lucide-rocket"></i
+                  ><span class="submit__label">Run log</span>
+                </button>
+                <button
+                  type="button"
+                  class="submit submit--grow"
+                  id="files-produce"
+                >
+                  <span class="submit__label">Produce new</span
+                  ><i class="lucide lucide-arrow-right submit__arrow"></i>
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <!-- Model Setup Data production (SRS DSM-VAE req 6, 8): follow the
+               worker's own output and the task's state over one stream until
+               it ends. Reached from the files card, which is what starts the
+               run; this card is where it is watched. -->
+          <section class="view" id="view-run" hidden>
+            <!-- State, tally and log in one panel: the bar is chrome for the
+                 console under it, so neither the status nor the result chips
+                 take height the log could have had. -->
+            <div class="runpanel" id="run-status" data-tone="idle">
+              <div class="runpanel__bar">
+                <i class="lucide lucide-rocket runpanel__rocket"></i>
+                <span class="runpanel__value" id="run-status-value"
+                  >Not started</span
+                >
+                <div class="chips" id="run-summary" hidden></div>
+                <!-- Stop rides with the state it stops rather than in the
+                     action row below: it is the only control showing while a
+                     run is live, and alone down there it was a button in an
+                     otherwise empty row. Never on screen at the same time as
+                     the chips, which only exist once a run has finished. -->
+                <button
+                  type="button"
+                  class="submit submit--ghost submit--compact runpanel__stop"
+                  id="run-cancel"
+                  hidden
+                >
+                  <i class="lucide lucide-circle-x"></i
+                  ><span class="submit__label">Cancel</span>
+                </button>
+              </div>
+
+              <div
+                class="console console--empty"
+                id="console"
+                aria-live="polite"
+                tabindex="0"
+              >
+                <p class="console__idle">
+                  <i class="lucide lucide-rocket"></i>Awaiting launch
+                </p>
+              </div>
+            </div>
+
+            <p class="message" id="run-message" role="alert"></p>
+
+            <!-- One bar at a time: Start until a run produces a model, then
+                 Core System Model in its place — that one on the line below,
+                 sharing it with the way back to the list it came from. -->
+            <div class="actions">
+              <button type="button" class="submit" id="run-start">
+                <span class="submit__label">Start production</span
+                ><i class="lucide lucide-arrow-right submit__arrow"></i>
+              </button>
+
+              <div class="actions__row">
+                <!-- Back to the produced files. Always available, including
+                     while a run is still going: leaving the console does not
+                     stop the run, and the stream is re-attached on the way
+                     back in. Alone on this line until a run succeeds. -->
+                <button
+                  type="button"
+                  class="submit submit--ghost submit--compact"
+                  id="run-back"
+                >
+                  <i class="lucide lucide-arrow-left"></i
+                  ><span class="submit__label">Produced files</span>
+                </button>
+                <!-- What a finished run leads to: the model itself, not a file
+                     to open elsewhere. It takes the larger share of the line —
+                     it is what the run was spent on. Downloading it is one of
+                     the things the Core System Model card offers. -->
+                <button
+                  type="button"
+                  class="submit submit--ok submit--grow"
+                  id="run-model"
+                  hidden
+                >
+                  <span class="submit__label">Core System Model</span
+                  ><i class="lucide lucide-arrow-right submit__arrow"></i>
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <!-- What the run produced, read back: the Model Setup Data file
+               itself, one panel per part of it. The card fetches the file
+               inline from the msd-files route and renders it; nothing here is
+               derived, every value is a field of the file. -->
+          <section class="view" id="view-model" hidden>
+            <!-- The context the file was generated for, and when — the same
+                 slash-path the inventory card carries, read from the file
+                 rather than from the session. -->
+            <div class="context" id="model-context" hidden>
+              <div class="context__cell" title="Project">
+                <span class="context__key">Project</span>
+                <span class="context__value" id="model-project"></span>
+              </div>
+              <div class="context__cell" title="Platform">
+                <span class="context__key">Platform</span>
+                <span class="context__value" id="model-platform"></span>
+              </div>
+              <div class="context__cell" title="System version">
+                <span class="context__key">Version</span>
+                <span class="context__value" id="model-version"></span
+                ><span class="context__flag" id="model-current" hidden>
+                  &middot; Current</span
+                >
+              </div>
+              <div class="context__cell" title="Generated">
+                <span class="context__key">Generated</span>
+                <span class="context__value" id="model-generated"></span>
+              </div>
+            </div>
+
+            <!-- The file itself, offered in the header's right margin rather
+                 than as a bar across the foot: it belongs with the line that
+                 names the model, and costs the deck below no height. -->
+            <a
+              class="submit submit--compact model__download"
+              id="model-download"
+              href="#"
+              download
+            >
+              <i class="lucide lucide-download"></i
+              ><span class="submit__label">Download</span>
+            </a>
+
+            <p class="model__loading" id="model-loading" hidden>
+              <span class="spinner"></span>Reading model
+            </p>
+
+            <div class="model__grid" id="model-grid" hidden>
+              <div class="model__column">
+                <div class="mpanel">
+                  <div class="mpanel__blur"></div>
+                  <div class="mpanel__corners"></div>
+                  <div class="mpanel__bar">
+                    <i class="lucide lucide-box-select"></i>Model Scale
+                  </div>
+                  <div class="scale" id="model-scale"></div>
+                </div>
+
+                <div class="mpanel mpanel--grow">
+                  <div class="mpanel__blur"></div>
+                  <div class="mpanel__corners"></div>
+                  <div class="mpanel__bar">
+                    <i class="lucide lucide-package"></i>Software Unit Inventory
+                    <span class="mpanel__count" id="model-unit-count"></span>
+                  </div>
+                  <div class="mpanel__body" id="model-units"></div>
+                </div>
+              </div>
+
+              <div class="model__column">
+                <div class="mpanel mpanel--grow">
+                  <div class="mpanel__blur"></div>
+                  <div class="mpanel__corners"></div>
+                  <div class="mpanel__bar">
+                    <i class="lucide lucide-list-checks"></i>Acquisition Log
+                    <span class="mpanel__count" id="model-log-count"></span>
+                  </div>
+                  <div class="mpanel__body" id="model-log"></div>
+                </div>
+
+                <div class="mpanel mpanel--grow mpanel--minor">
+                  <div class="mpanel__blur"></div>
+                  <div class="mpanel__corners"></div>
+                  <div class="mpanel__bar">
+                    <i class="lucide lucide-triangle-alert"></i>Validation Errors
+                    <span class="mpanel__count" id="model-error-count"></span>
+                  </div>
+                  <div class="mpanel__body" id="model-errors"></div>
+                </div>
+              </div>
+            </div>
+
+            <p class="message" id="model-message" role="alert"></p>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <!-- Connection details for whichever source tile was clicked. One panel
+         serves every source: the header and the endpoint come from the
+         source, the three fields are the same for all of them. -->
+    <div class="modal" id="modal" hidden>
+      <div class="modal__scrim" data-modal-close></div>
+      <div
+        class="modal__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modal-title"
+      >
+        <button
+          type="button"
+          class="linkbtn modal__close"
+          data-modal-close
+          title="Close"
+          aria-label="Close"
+        >
+          <i class="lucide lucide-x"></i>
+        </button>
+
+        <!-- The same header a card carries, in the same order: what this is,
+             its glyph, then the line saying what it is for. -->
+        <h1 class="title" id="modal-title"></h1>
+        <i class="lucide brand-icon" id="modal-icon"></i>
+        <p class="subtitle">Connection Details</p>
+
+        <form id="modal-form" novalidate>
+          <label class="field">
+            <i class="lucide lucide-server"></i>
+            <input
+              id="source-address"
+              type="text"
+              placeholder="CONNECTION ADDRESS"
+              aria-label="Connection address"
+              aria-describedby="modal-message"
+              autocapitalize="none"
+              spellcheck="false"
+            />
+          </label>
+
+          <label class="field">
+            <i class="lucide lucide-user"></i>
+            <input
+              id="source-username"
+              type="text"
+              placeholder="USERNAME"
+              aria-label="Source username"
+              aria-describedby="modal-message"
+              autocomplete="off"
+              autocapitalize="none"
+              spellcheck="false"
+            />
+          </label>
+
+          <label class="field">
+            <i class="lucide lucide-key"></i>
+            <input
+              id="source-password"
+              type="password"
+              placeholder="PASSWORD"
+              aria-label="Source password"
+              aria-describedby="modal-message"
+              autocomplete="off"
+            />
+            <button
+              type="button"
+              class="reveal"
+              data-reveal="source-password"
+              aria-label="Show password"
+            >
+              <i class="lucide lucide-eye-off"></i>
+            </button>
+          </label>
+
+          <p class="hint">Asked once &mdash; the connection stays open for this session.</p>
+
+          <p class="message" id="modal-message" role="alert"></p>
+
+          <div class="actions">
+            <button type="submit" class="submit" id="modal-submit">
+              <span class="submit__label">Connect</span
+              ><i class="lucide lucide-arrow-right submit__arrow"></i>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>

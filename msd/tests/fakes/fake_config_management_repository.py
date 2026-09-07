@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-from domain.system_hierarchy import SystemHierarchyRecord
-from domain.inventory import SoftwareUnitVersion
-from domain.project_context import PlatformRecord, ProjectRecord, VersionRecord
-from ports.config_management_repository import ConfigManagementAccessError, IConfigManagementRepository
+from msd.domain.system_hierarchy import SystemHierarchyRecord
+from msd.domain.inventory import SoftwareUnitVersion
+from msd.domain.project_context import PlatformRecord, ProjectRecord, VersionRecord
+from msd.ports.config_management_repository import ConfigManagementAccessError, IConfigManagementRepository
 
 
 class FakeConfigManagementRepository(IConfigManagementRepository):

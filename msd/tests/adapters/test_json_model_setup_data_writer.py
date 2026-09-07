@@ -2,7 +2,7 @@
 (SRS DSM-MSD req 19): QoS-derived topic frequency/criticality, topic node
 creation, and application priority/hotstandby/role attributes."""
 
-from adapters.json_model_setup_data_writer import (
+from msd.adapters.json_model_setup_data_writer import (
     _APP_HOTSTANDBY_OPTIONS,
     _APP_PRIORITY_OPTIONS,
     _create_apps_libs_and_relations,
@@ -10,7 +10,7 @@ from adapters.json_model_setup_data_writer import (
     _derive_topic_criticality,
     _derive_topic_frequency,
 )
-from domain.model_setup_data import ModelSetupDataTopic
+from msd.domain.model_setup_data import ModelSetupDataTopic
 
 
 # --- _derive_topic_frequency ------------------------------------------------

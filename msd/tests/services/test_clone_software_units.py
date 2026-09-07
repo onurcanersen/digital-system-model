@@ -4,11 +4,11 @@ from pathlib import Path
 
 from fakes.fake_config_management_repository import FakeConfigManagementRepository
 from fakes.fake_source_code_repository import DiskCloningSourceCodeRepository
-from domain.inventory import SoftwareUnitVersion
-from domain.status import CloneStatus
-from services.acquire_project_context import AcquireProjectContext
-from services.build_software_unit_inventory import BuildSoftwareUnitInventory
-from services.clone_software_units import CloneSoftwareUnits
+from msd.domain.inventory import CandidateUnitVersion, SoftwareUnitVersion
+from msd.domain.status import CloneStatus
+from msd.services.acquire_project_context import AcquireProjectContext
+from msd.services.build_software_unit_inventory import BuildSoftwareUnitInventory
+from msd.services.clone_software_units import CloneSoftwareUnits
 
 
 def _use_case(source_repo, config_repo=None):
@@ -54,6 +54,32 @@ def test_records_per_unit_error_without_aborting(tmp_path: Path):
     assert "cannot clone 'nav_app'" in by_unit["nav_app"].detail
     assert by_unit["sensor_app"].status == CloneStatus.CLONED
     assert (dest / "sensor_app" / "Makefile").is_file()
+
+
+def test_clones_the_candidate_version_rather_than_the_one_the_system_version_pins(tmp_path: Path):
+    """Req 11: the clone step must fetch the version under evaluation, since
+    the version is the ref the source repository is asked for."""
+    config_repo = FakeConfigManagementRepository(
+        unit_versions={
+            "1.0.0": [
+                SoftwareUnitVersion("nav_app", "1.0.0"),
+                SoftwareUnitVersion("sensor_app", "1.0.0"),
+            ]
+        }
+    )
+    source_repo = DiskCloningSourceCodeRepository()
+    use_case = _use_case(source_repo, config_repo)
+
+    results = use_case.execute(
+        tmp_path / "ws", "proj-1", "plat-1", "1.0.0",
+        candidate=CandidateUnitVersion("sensor_app", "1.0.3"),
+    )
+
+    assert sorted(source_repo.cloned) == [("nav_app", "1.0.0"), ("sensor_app", "1.0.3")]
+    assert {r.unit.unit_name: r.unit.version for r in results} == {
+        "nav_app": "1.0.0",
+        "sensor_app": "1.0.3",
+    }
 
 
 def test_raises_when_context_cannot_be_acquired(tmp_path: Path):

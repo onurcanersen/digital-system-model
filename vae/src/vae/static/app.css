@@ -1,0 +1,2318 @@
+:root {
+  --cyan: #22e6f5;
+  --cyan-dim: rgba(34, 230, 245, 0.45);
+  --line: rgba(34, 230, 245, 0.18);
+  --ink: #dfeef2;
+  --muted: rgba(223, 238, 242, 0.55);
+  --danger: #ff6b7a;
+  --ok: #35e07f;
+  --warn: #ffc46b;
+
+  /* Borders say what a box is: a static container is drawn in --line,
+     anything the operator can click or type into in --cyan-dim. */
+
+  /* Every card's header keeps one rhythm, whichever of the three marks
+     it carries: title → mark → subtitle (or the context strip standing
+     in for one) → content → command bar. A card without a glyph or
+     without a subtitle simply drops that step; the rest do not move. */
+  --gap-mark: 16px;
+  --gap-lead: 22px;
+  --gap-body: 32px;
+  --gap-actions: 24px;
+  /* A message strip has spoken just above, so the bar closes up. */
+  --gap-actions-tight: 8px;
+
+  /* A fixed set of widths: the narrow one the pre-auth cards have
+     always had, a form, a list, and the two full-bleed decks whose
+     content is the point of the card. Each is capped at 100% rather
+     than a vw fraction, so the cap is measured against the box the card
+     actually sits in — the body inside its own padding — and a card can
+     never come out wider than the shell centring it. */
+  --card-pad: 28px 26px;
+  --w-signin: min(292px, 100%);
+  --w-form: min(392px, 100%);
+  --w-list: min(480px, 100%);
+  --w-full: min(1180px, 100%);
+  --r-card: 14px;
+  --r-panel: 8px;
+  --r-control: 6px;
+
+  --fs-title: 20px;
+  --fs-sub: 11px;
+  --fs-row: 12.5px;
+  --fs-value: 11.5px;
+  /* One size for every muted aside: notes, empty states, hints, the
+     standing-by lines and the loading lines. */
+  --fs-info: 11px;
+  --fs-detail: 10.5px;
+  --fs-label: 9.5px;
+  --fs-chip: 9px;
+  --ls-sub: 0.2em;
+  --ls-label: 0.18em;
+
+  --icon-size: 60px;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  box-sizing: border-box;
+  font-family: Barlow, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background-image: url("bg.jpeg");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
+/* Where the operator is in the flow after signing in. Completed stages go
+   green, the current one cyan, the rest stay muted; the connector to a
+   stage's left is completed whenever that stage is reached. */
+.shell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+  /* The widest step the shell hosts, so a card of any step centres
+     inside it rather than spilling out of one sized for the form. */
+  width: var(--w-list);
+  /* Centred with auto margins rather than by the body's alignment
+     alone: the run card is tall enough to outgrow a short viewport,
+     and a centred flex item that overflows is unreachable above the
+     fold unless its own margins do the centring. */
+  margin: auto;
+}
+
+/* Page chrome, pinned to the corner rather than sharing the card's
+   width — at 392px the stepper and the identity crowd each other. */
+.sessionbar {
+  position: fixed;
+  top: 18px;
+  right: 22px;
+  z-index: 5;
+}
+
+.stepper[hidden] {
+  display: none;
+}
+
+.stepper {
+  display: flex;
+  justify-content: center;
+  align-self: center;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Five stages across the shell's 392px, so the basis is what fits
+   rather than a round number. */
+.stepper__item {
+  position: relative;
+  flex: 0 0 74px;
+}
+
+/* A stage that has been reached is a way back to it; one that has not
+   is inert. This replaces the old back arrow. */
+.stepper__button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+
+.stepper__button:disabled {
+  cursor: default;
+}
+
+.stepper__button:not(:disabled):hover .stepper__mark,
+.stepper__button:not(:disabled):focus-visible .stepper__mark {
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+
+.stepper__button:not(:disabled):hover .stepper__name,
+.stepper__button:not(:disabled):focus-visible .stepper__name {
+  color: var(--cyan);
+}
+
+.stepper__item::before {
+  content: "";
+  position: absolute;
+  top: 13px;
+  left: -50%;
+  width: 100%;
+  height: 2px;
+  background-color: var(--line);
+}
+
+.stepper__item:first-child::before {
+  display: none;
+}
+
+.stepper__item[data-state="done"]::before,
+.stepper__item[data-state="current"]::before {
+  background-color: var(--ok);
+  box-shadow: 0 0 10px rgba(53, 224, 127, 0.5);
+}
+
+.stepper__mark {
+  position: relative;
+  z-index: 1;
+  /* 28px including the border, so the connector's 13px offset lands on
+     the circle's centre rather than 3px above it. */
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--line);
+  border-radius: 50%;
+  background-color: #06202b;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  /* The glyph and the digit both sit on the circle's centre line. */
+  line-height: 1;
+}
+
+.stepper__num {
+  display: block;
+  line-height: 1;
+}
+
+.stepper__item[data-state="done"] .stepper__mark {
+  border-color: var(--ok);
+  color: var(--ok);
+  box-shadow: 0 0 12px rgba(53, 224, 127, 0.45);
+}
+
+.stepper__item[data-state="current"] .stepper__mark {
+  border-color: var(--cyan);
+  color: var(--cyan);
+  box-shadow: 0 0 16px rgba(34, 230, 245, 0.55);
+}
+
+/* One mark holds all three glyphs; state decides which one shows. */
+.stepper__mark .lucide {
+  display: none;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.stepper__item[data-state="done"] .lucide-check {
+  display: block;
+}
+
+/* Only a completed stage swaps its number for a check; the current
+   stage keeps its number, in cyan. */
+.stepper__item[data-state="done"] .stepper__num {
+  display: none;
+}
+
+.stepper__name {
+  font-size: 9px;
+  white-space: nowrap;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.stepper__item[data-state="done"] .stepper__name {
+  color: rgba(53, 224, 127, 0.85);
+}
+
+.stepper__item[data-state="current"] .stepper__name {
+  color: var(--cyan);
+}
+
+@media (max-width: 420px) {
+  .stepper__item {
+    flex-basis: 62px;
+  }
+}
+
+/* The frame, stated once: a stage card is drawn with it, and so is each
+   panel of the model deck, which is a card in its own right rather than
+   a box inside one. Everything below to the end of .card__body is that
+   frame — border, frosted fill, four brackets — and every rule names
+   both users, so the two can never drift apart. */
+.card,
+.mpanel {
+  position: relative;
+  box-sizing: border-box;
+  border: 2px solid rgba(34, 230, 245, 0.3);
+  border-radius: var(--r-card);
+  box-shadow: inset 0 0 60px rgba(34, 230, 245, 0.06);
+}
+
+/* The default step: the two stages that are a short stack of controls.
+   Width and padding are the stage card's alone — the deck's panels take
+   their width from the grid and hold a bar and a list flush to the
+   frame, with no inset of their own. */
+.card {
+  width: var(--w-form);
+  padding: var(--card-pad);
+  transition: width 0.3s ease;
+}
+
+/* Narrower than any stage card, and the two of them the same: sign-in
+   carries two fields and a button, and the card restoring the session
+   hands straight over to it — a width change between them would be the
+   first thing the page did. */
+.card[data-view="boot"],
+.card[data-view="login"] {
+  width: var(--w-signin);
+}
+
+/* The cards that differ in content height; holding the tallest of them
+   steady stops the card resizing as the operator moves between stages.
+   Not on the two full-bleed decks, which are sized by the viewport, nor
+   on boot and sign-in, which would open on a floor of dead space. */
+.card[data-view="sources"] .card__body,
+.card[data-view="select"] .card__body,
+.card[data-view="inventory"] .card__body,
+.card[data-view="files"] .card__body {
+  min-height: 268px;
+}
+
+/* Frosted panel without backdrop-filter (unsupported in Firefox < 103):
+   a clipped copy of the page background, blurred with a plain filter. */
+.card__blur,
+.mpanel__blur {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: 12px;
+  z-index: 0;
+}
+
+/* background-attachment: fixed paints against the viewport, exactly like
+   body does, so this copy stays registered with the page background no
+   matter where the card sits. The negative inset keeps the blur's soft
+   edge outside the clip, so the panel has no faded rim. */
+.card__blur::before,
+.mpanel__blur::before {
+  content: "";
+  position: absolute;
+  inset: -24px;
+  background-image: url("bg.jpeg");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  filter: blur(3px);
+}
+
+.card__blur::after,
+.mpanel__blur::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-color: rgba(6, 26, 36, 0.42);
+}
+
+/* Four glowing corner brackets, sitting on top of the card border. */
+.card::before,
+.card::after,
+.card__corners::before,
+.card__corners::after,
+.mpanel::before,
+.mpanel::after,
+.mpanel__corners::before,
+.mpanel__corners::after {
+  content: "";
+  position: absolute;
+  width: 38px;
+  height: 38px;
+  border: 3px solid var(--cyan);
+  /* .card::before precedes the child layers in paint order, so without
+     this the blur panel's tint washes out the top-left bracket. */
+  z-index: 1;
+  /* Layered drop-shadows follow the whole L outline, so the arm tips
+     glow as strongly as the corner itself. */
+  filter: drop-shadow(0 0 3px rgba(34, 230, 245, 0.95))
+    drop-shadow(0 0 8px rgba(34, 230, 245, 0.7))
+    drop-shadow(0 0 16px rgba(34, 230, 245, 0.4));
+}
+
+.card__corners,
+.mpanel__corners {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Top brackets carry a longer vertical arm than the bottom pair. */
+.card::before,
+.card::after,
+.mpanel::before,
+.mpanel::after {
+  height: 62px;
+}
+
+.card::before,
+.mpanel::before {
+  top: -2px;
+  left: -2px;
+  border-right: 0;
+  border-bottom: 0;
+  border-top-left-radius: 14px;
+}
+
+.card::after,
+.mpanel::after {
+  top: -2px;
+  right: -2px;
+  border-left: 0;
+  border-bottom: 0;
+  border-top-right-radius: 14px;
+}
+
+.card__corners::before,
+.mpanel__corners::before {
+  bottom: -2px;
+  left: -2px;
+  border-right: 0;
+  border-top: 0;
+  border-bottom-left-radius: 14px;
+}
+
+.card__corners::after,
+.mpanel__corners::after {
+  bottom: -2px;
+  right: -2px;
+  border-left: 0;
+  border-top: 0;
+  border-bottom-right-radius: 14px;
+}
+
+.card__body {
+  position: relative;
+  z-index: 1;
+}
+
+.title {
+  margin: 0;
+  font-family: Orbitron, Barlow, sans-serif;
+  font-weight: 700;
+  font-size: var(--fs-title);
+  line-height: 1.3;
+  letter-spacing: 0.06em;
+  text-align: center;
+  text-transform: uppercase;
+  text-shadow: 0 0 18px rgba(34, 230, 245, 0.35);
+}
+
+/* The product's own mark, on the sign-in card only — larger than a card
+   glyph because it is the product being named, not the card's subject. */
+.logo {
+  display: block;
+  width: auto;
+  height: 92px;
+  margin: var(--gap-mark) auto 0;
+  filter: drop-shadow(0 0 14px rgba(34, 230, 245, 0.35));
+}
+
+.logo[hidden] {
+  display: none;
+}
+
+/* Glyph for cards that are about one thing rather than the product. */
+.brand-icon {
+  display: block;
+  margin: var(--gap-mark) auto 0;
+  font-size: var(--icon-size);
+  line-height: 1;
+  text-align: center;
+  color: var(--cyan);
+  filter: drop-shadow(0 0 14px rgba(34, 230, 245, 0.35));
+}
+
+.brand-icon[hidden] {
+  display: none;
+}
+
+/* The rhythm's last two steps, and the only place they are set: no view
+   tunes these. A card whose content wants more or less room says so in
+   its own content, not by moving the header. */
+.subtitle {
+  margin: var(--gap-lead) 0 var(--gap-body);
+  font-family: Orbitron, Barlow, sans-serif;
+  font-size: var(--fs-sub);
+  font-weight: 600;
+  letter-spacing: var(--ls-sub);
+  text-align: center;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+
+.subtitle[hidden] {
+  display: none;
+}
+
+/* Step two of the ladder: a unit name and its version sit on one row, a
+   produced file's timestamp and producer share a row with the two things
+   you can do to it, and at the form's 392px neither would. */
+.card[data-view="inventory"],
+.card[data-view="files"] {
+  width: var(--w-list);
+}
+
+/* Step three, shared by the two decks: the run is a console and the
+   model is a grid of panels, and both are sized by the viewport rather
+   than by their content — the shell stretches to the body's full height
+   so nothing has to overflow to be read. min(…, 100%) rather than a vw
+   cap keeps them inside the body's 24px padding at every size. */
+.shell--run,
+.shell--model {
+  width: var(--w-full);
+  align-self: stretch;
+  margin: 0 auto;
+}
+
+.card[data-view="run"],
+.card[data-view="model"] {
+  width: 100%;
+}
+
+/* Height flows down one chain — card → body → view → panel → console —
+   so the log absorbs whatever the header, bar and actions leave. Each
+   link needs min-height: 0, or a flex item refuses to shrink past its
+   own content. The run view is matched with :not([hidden]) because an id
+   outranks the .view[hidden] rule under this one. */
+.shell--run .card,
+.shell--run .card__body,
+.shell--run #view-run:not([hidden]),
+.shell--run .runpanel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.view[hidden] {
+  display: none;
+}
+
+.field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+  border: 1px solid var(--cyan-dim);
+  border-radius: var(--r-control);
+  background-color: rgba(4, 22, 31, 0.5);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.field:focus-within {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 1px rgba(34, 230, 245, 0.35),
+    0 0 16px rgba(34, 230, 245, 0.28);
+}
+
+.field > .lucide {
+  padding: 0 12px;
+  font-size: 16px;
+  color: var(--cyan);
+  opacity: 0.85;
+}
+
+.field input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px 10px 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  caret-color: var(--cyan);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.field input::placeholder {
+  color: var(--muted);
+  letter-spacing: 0.09em;
+}
+
+.field input:-webkit-autofill {
+  -webkit-text-fill-color: var(--ink);
+  -webkit-box-shadow: 0 0 0 1000px #08242f inset;
+}
+
+.reveal {
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.reveal:hover,
+.reveal:focus-visible {
+  color: var(--cyan);
+}
+
+/* Message strip: hidden until it carries text, so the resting form has
+   no dead band. It owns no margin below itself — the action row owns
+   both gaps, so the pair reads the same in a block card and in the two
+   flex decks, which do not collapse margins. */
+.message {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 107, 122, 0.35);
+  border-radius: 4px;
+  background-color: rgba(255, 107, 122, 0.1);
+  color: var(--danger);
+  font-size: var(--fs-value);
+  line-height: 1.35;
+  letter-spacing: 0.03em;
+  animation: message-in 0.22s ease-out;
+}
+
+.message:empty {
+  display: none;
+}
+
+.message .lucide {
+  flex: none;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.message--ok {
+  border-color: rgba(34, 230, 245, 0.35);
+  background-color: rgba(34, 230, 245, 0.1);
+  color: var(--cyan);
+}
+
+/* A neutral, in-flight notice (e.g. a stream re-dial): deliberately
+   neither the danger base nor the ok cyan, so it reads as "happening",
+   not "wrong". */
+.message--info {
+  border-color: var(--line);
+  background-color: rgba(223, 238, 242, 0.06);
+  color: var(--ink);
+}
+
+@keyframes message-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
+/* The tiles' own status lines sit directly above, so the strip needs
+   room of its own not to read as part of the second tile. */
+#view-sources .message:not(:empty) {
+  margin-top: 18px;
+}
+
+/* Actions own the gap above themselves, so it is the same on every card
+   whether or not a message strip is showing. */
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-top: var(--gap-actions);
+}
+
+.message:not(:empty) + .actions {
+  margin-top: var(--gap-actions-tight);
+}
+
+.actions[hidden] {
+  display: none;
+}
+
+/* Two actions the operator chooses between rather than one after the
+   other — the way back and the way on — so they share a line instead of
+   stacking into two bars of equal weight. Widths are shares of the row,
+   not of the labels: --compact's flex:none is undone here. */
+.actions__row {
+  display: flex;
+  gap: 9px;
+}
+
+.actions__row > .submit {
+  flex: 1 1 0;
+  width: auto;
+}
+
+/* The action the card leads to takes twice the row, so the pair reads as
+   one forward bar with a way back beside it rather than as a choice
+   between equals. Alone in the row, the other one still fills it. */
+.actions__row > .submit--grow {
+  flex-grow: 2;
+}
+
+/* Submit: a bordered command bar. Hover sweeps a solid cyan fill in
+   from the left and flips the label to dark ink. */
+.submit {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 12px 16px;
+  overflow: hidden;
+  border: 1px solid var(--cyan);
+  border-radius: var(--r-control);
+  background-color: rgba(34, 230, 245, 0.07);
+  color: var(--cyan);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 0.28s ease, box-shadow 0.28s ease;
+}
+
+/* display:flex above would otherwise beat the hidden attribute the run
+   card toggles these with. */
+.submit[hidden] {
+  display: none;
+}
+
+.submit::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-color: var(--cyan);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.32s ease;
+}
+
+/* Lift the label above the sweeping fill. */
+.submit > * {
+  position: relative;
+  z-index: 1;
+}
+
+.submit__arrow {
+  margin-left: 10px;
+  font-size: 18px;
+  line-height: 1;
+  transition: transform 0.28s ease;
+}
+
+.submit:hover:not(:disabled),
+.submit:focus-visible:not(:disabled) {
+  color: #04222c;
+  outline: none;
+  box-shadow: 0 0 26px rgba(34, 230, 245, 0.45);
+}
+
+.submit:hover:not(:disabled)::before,
+.submit:focus-visible:not(:disabled)::before {
+  transform: scaleX(1);
+}
+
+.submit:hover:not(:disabled) .submit__arrow,
+.submit:focus-visible:not(:disabled) .submit__arrow {
+  transform: translateX(4px);
+}
+
+.submit:active:not(:disabled) {
+  box-shadow: 0 0 12px rgba(34, 230, 245, 0.35);
+}
+
+.submit:disabled {
+  cursor: not-allowed;
+  border-color: var(--cyan-dim);
+  color: var(--muted);
+}
+
+.submit:disabled .submit__arrow {
+  display: none;
+}
+
+/* Secondary action: same bar, no fill. */
+.submit--ghost {
+  border-color: var(--line);
+  background-color: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+}
+
+.submit--ghost::before {
+  display: none;
+}
+
+/* Sized to its own label rather than the row: in the run card's single
+   action row, the width belongs to the action the operator came for.
+   After --ghost, so a bar carrying both ends up compact. */
+.submit--compact {
+  flex: none;
+  gap: 8px;
+  width: auto;
+  padding: 10px 14px;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+}
+
+.submit--ghost:hover:not(:disabled),
+.submit--ghost:focus-visible:not(:disabled) {
+  border-color: var(--cyan-dim);
+  color: var(--cyan);
+  box-shadow: none;
+}
+
+/* The bar a finished run hands you: same command bar in the green the
+   rest of the page already spends on a good outcome, so it reads as the
+   reward for the run rather than one more cyan step. After the base
+   rules, which it overrides at equal specificity. */
+.submit--ok {
+  border-color: var(--ok);
+  background-color: rgba(53, 224, 127, 0.07);
+  color: var(--ok);
+}
+
+.submit--ok::before {
+  background-color: var(--ok);
+}
+
+.submit--ok:hover:not(:disabled),
+.submit--ok:focus-visible:not(:disabled) {
+  color: #04220f;
+  box-shadow: 0 0 26px rgba(53, 224, 127, 0.45);
+}
+
+.submit--ok:active:not(:disabled) {
+  box-shadow: 0 0 12px rgba(53, 224, 127, 0.35);
+}
+
+.submit--ok:disabled {
+  border-color: rgba(53, 224, 127, 0.45);
+}
+
+.spinner {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  vertical-align: -2px;
+  border: 2px solid rgba(34, 230, 245, 0.25);
+  border-top-color: var(--cyan);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+.submit__label .spinner {
+  margin-right: 9px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* The one micro-label: whatever names a control, a cell or a panel row
+   is set here — the pickers' captions, the candidate row's words, the
+   scale cells' captions and the source tiles' names. */
+.label,
+.units__candidate-key,
+.scale__label,
+.source__name,
+.source__state,
+.files__label,
+.mpanel__bar {
+  /* Pinned rather than left to the font's default line box, so a label
+     costs the same height wherever it lands. */
+  line-height: 1.2;
+  font-size: var(--fs-label);
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.label {
+  display: block;
+  margin: 0 0 5px;
+}
+
+.picker {
+  margin-bottom: 12px;
+}
+
+.picker__control {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--cyan-dim);
+  border-radius: var(--r-control);
+  background-color: rgba(4, 22, 31, 0.5);
+  transition: border-color 0.2s, box-shadow 0.2s, opacity 0.2s;
+}
+
+.picker__control:focus-within {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 1px rgba(34, 230, 245, 0.35),
+    0 0 16px rgba(34, 230, 245, 0.28);
+}
+
+.picker__control .lucide {
+  position: absolute;
+  right: 11px;
+  font-size: 12px;
+  color: var(--cyan);
+  pointer-events: none;
+}
+
+.picker select {
+  width: 100%;
+  padding: 10px 32px 10px 12px;
+  border: 0;
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+  cursor: pointer;
+  /* Drop the platform chrome; the chevron above stands in for it. */
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+}
+
+/* The dropdown list is painted by the OS, so it needs its own colors. */
+.picker select option {
+  background-color: #06202b;
+  color: var(--ink);
+}
+
+.picker select:disabled {
+  cursor: not-allowed;
+  color: var(--muted);
+}
+
+.picker--disabled .picker__control {
+  border-color: var(--line);
+  opacity: 0.6;
+}
+
+/* One tile per data source, each opening the connection modal, each
+   saying underneath whether this session holds that connection. */
+.sources {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+}
+
+@media (max-width: 360px) {
+  .sources {
+    grid-template-columns: 1fr;
+  }
+}
+
+.source__tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 104px;
+  padding: 16px 10px;
+  box-sizing: border-box;
+  /* A tile is a button, so it carries the interactive border rather
+     than the quieter one the static panels use. */
+  border: 1px solid var(--cyan-dim);
+  border-radius: var(--r-panel);
+  background-color: rgba(4, 22, 31, 0.5);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.source__tile:hover,
+.source__tile:focus-visible {
+  border-color: var(--cyan);
+  outline: none;
+  box-shadow: 0 0 0 1px rgba(34, 230, 245, 0.35),
+    0 0 16px rgba(34, 230, 245, 0.28);
+}
+
+.source__icon {
+  font-size: 34px;
+  line-height: 1;
+  color: var(--cyan);
+  filter: drop-shadow(0 0 10px rgba(34, 230, 245, 0.35));
+}
+
+/* Set by the shared label rule; only the centring is its own. */
+.source__name {
+  line-height: 1.3;
+  text-align: center;
+}
+
+.source[data-state="on"] .source__tile {
+  border-color: rgba(53, 224, 127, 0.45);
+}
+
+.source[data-state="on"] .source__name {
+  color: var(--ink);
+}
+
+.source__state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin: 9px 0 0;
+}
+
+.source__dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: var(--muted);
+}
+
+.source[data-state="on"] .source__state {
+  color: var(--ok);
+}
+
+.source[data-state="on"] .source__dot {
+  background-color: var(--ok);
+  box-shadow: 0 0 8px rgba(53, 224, 127, 0.9);
+}
+
+/* Connection details, over the card rather than inside it: the tiles
+   stay visible behind the scrim, so it is clear which source is being
+   connected. A plain overlay, not <dialog> — same reason the card's
+   frosted panel avoids backdrop-filter. */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.modal[hidden] {
+  display: none;
+}
+
+.modal__scrim {
+  position: absolute;
+  inset: 0;
+  background-color: rgba(3, 16, 23, 0.72);
+}
+
+/* A card at compact scale: it is built from the same header, fields and
+   command bar, so it restates the rhythm's tokens rather than carrying
+   one-off margins of its own. Everything below the header then falls
+   where it does on a full card, three-quarters the size. */
+.modal__panel {
+  --fs-title: 15px;
+  --icon-size: 40px;
+  --gap-mark: 10px;
+  --gap-lead: 14px;
+  --gap-body: 22px;
+
+  position: relative;
+  box-sizing: border-box;
+  width: min(340px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 26px 26px 24px;
+  border: 2px solid rgba(34, 230, 245, 0.3);
+  border-radius: var(--r-card);
+  background-color: #06202b;
+  box-shadow: inset 0 0 60px rgba(34, 230, 245, 0.06),
+    0 0 40px rgba(3, 16, 23, 0.6);
+  animation: modal-in 0.18s ease-out;
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.modal__close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+}
+
+/* The close button shares the title's line, so the heading keeps clear
+   of both ends of it rather than running under one. */
+.modal__panel .title {
+  padding: 0 20px;
+}
+
+/* The confirmed context, as one slash-separated path above the content
+   it scopes — bare, standing in for the subtitle on the two cards that
+   carry it, and taking the subtitle's exact box so the header lands
+   where every other card's does. */
+.context {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+  margin: var(--gap-lead) 0 var(--gap-body);
+  overflow: hidden;
+}
+
+/* Set like the subtitle it stands in for. */
+.context__cell {
+  min-width: 0;
+  overflow: hidden;
+  font-family: Orbitron, Barlow, sans-serif;
+  font-size: var(--fs-sub);
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: var(--ls-sub);
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--cyan);
+}
+
+.context__cell + .context__cell::before {
+  content: "/";
+  margin-right: 8px;
+  color: var(--muted);
+}
+
+/* Read aloud, never drawn — the strip is one line, and a visible key
+   would double its height for meaning the order already gives. */
+.context__key {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* The effective version, marked inline so saying so costs the line no
+   height at all. Set exactly like the path it sits in, and told apart
+   by colour alone — green, since the path around it is all cyan. */
+.context__flag {
+  color: var(--ok);
+}
+
+.context__flag[hidden] {
+  display: none;
+}
+
+/* ------------------------------------------------ list primitives */
+
+/* Three cards list things — the inventory, the produced files, the run's
+   own log — and the model deck lists four more. They are all the same
+   object: a bordered box, a chrome bar naming it, a stack of rows. The
+   rules below are that object, stated once and shared by every user;
+   what follows each is only where a card genuinely differs. The deck's
+   panels take their box from the card frame rather than from the border
+   here — they stand on the page rather than inside a card — but their
+   bars and rows are these. */
+
+.units,
+.files,
+.runpanel {
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  overflow: hidden;
+}
+
+/* Only the inventory takes focus, through the filter it contains. */
+.units {
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.units:focus-within {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 1px rgba(34, 230, 245, 0.35),
+    0 0 16px rgba(34, 230, 245, 0.28);
+}
+
+/* The bar across the top of a panel: it names the list, and carries
+   whatever belongs to the list as a whole rather than to one row. */
+.units__search,
+.files__label,
+.runpanel__bar,
+.mpanel__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  min-height: 34px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background-color: rgba(4, 22, 31, 0.5);
+}
+
+/* A bar that captions rather than holds a control takes the card's
+   headline face over the label scale it already carries. */
+.files__label,
+.mpanel__bar {
+  font-family: Orbitron, Barlow, sans-serif;
+  font-weight: 600;
+  color: var(--cyan);
+}
+
+.units__search > .lucide,
+.files__label .lucide,
+.mpanel__bar .lucide {
+  flex: none;
+  font-size: 13px;
+  color: var(--cyan);
+  opacity: 0.85;
+}
+
+/* How many rows the panel is showing — of the total, when a filter is
+   narrowing them — at the bar's far end. */
+.units__count,
+.mpanel__count {
+  flex: none;
+  margin-left: auto;
+  font-family: Barlow, sans-serif;
+  font-size: var(--fs-info);
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+/* One row of a list: the same box wherever it is listed. */
+.units__row,
+.filerow,
+.mrow {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.units__row:last-child,
+.filerow:last-child,
+.mrow:last-child {
+  border-bottom: 0;
+}
+
+/* Rows that put their parts on one line, and the head line of the ones
+   that do not. */
+.units__row,
+.filerow,
+.mrow__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+/* What the row is about, and what it is worth: a name that gives way
+   first, and a value in cyan that never does. */
+.units__name,
+.mrow__name,
+.filerow__when {
+  font-size: var(--fs-row);
+}
+
+.units__name,
+.mrow__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.units__version,
+.mrow__value,
+.filerow__by {
+  flex: none;
+  font-size: var(--fs-value);
+  letter-spacing: 0.04em;
+  color: var(--cyan);
+}
+
+/* The row's own detail, under the name it belongs to. */
+.mrow__detail,
+.filerow__scale {
+  font-size: var(--fs-detail);
+  color: var(--muted);
+}
+
+/* Every muted aside on every card: a note, an empty state, a hint. */
+.hint,
+.candidate__note,
+.files__empty,
+.units__empty,
+.boot,
+.console__idle,
+.model__loading {
+  margin: 0;
+  font-size: var(--fs-info);
+  line-height: 1.35;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+/* The ones that report rather than explain — standing by, loading —
+   read as status: centred on their spinner or glyph, and set like the
+   labels they sit among. */
+.boot,
+.console__idle,
+.model__loading,
+.units__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.boot,
+.console__idle,
+.model__loading {
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+}
+
+/* ------------------------------------------------ inventory card */
+
+/* Filter and rows in one box; only the rows scroll, so the filter and
+   its count stay pinned while a long inventory moves under them. */
+.units__search input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  caret-color: var(--cyan);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.units__search input::placeholder {
+  color: var(--muted);
+  letter-spacing: 0.09em;
+}
+
+/* The floor that keeps a filtered list from shrinking the box is set
+   in script, from the height the full list settles at.
+
+   The cap is viewport-relative as well as absolute: this is the one
+   card whose content has no bound — a system version can define any
+   number of units — and the list is the only part of it that can give
+   way, so on a short screen it yields rather than pushing the Produce
+   button past the fold. */
+.units__list {
+  max-height: min(190px, 22vh);
+  overflow-y: auto;
+}
+
+/* The version being evaluated for installation, not the one this
+   system version pins. */
+.units__badge {
+  flex: none;
+  padding: 2px 7px;
+  border: 1px solid rgba(53, 224, 127, 0.45);
+  border-radius: 999px;
+  font-size: var(--fs-chip);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ok);
+}
+
+/* The candidate version under evaluation (SRS DSM-MSD req 11), as the
+   inventory box's last row — it rewrites a row of the list above, so
+   it sits inside the same frame, on the filter row's tint so the two
+   controls that bracket the list read as a pair. One line, because a
+   run evaluates at most one unit: stacking two labelled pickers under
+   the box instead cost the card a fold's worth of height. */
+.units__candidate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-top: 1px solid var(--line);
+  background-color: rgba(4, 22, 31, 0.5);
+}
+
+/* The sentence the row reads as. The selects carry their own
+   aria-labels, so these are decoration for screen readers. */
+.units__candidate-key {
+  flex: none;
+}
+
+/* The two selects split what the words leave, so neither truncates
+   while the other has room going spare. */
+.units__candidate .picker {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+/* Inside the box the control is one row among others, not a field of
+   its own: the quieter border and tighter metrics keep it from
+   outweighing the inventory it belongs to. */
+.picker--inline .picker__control {
+  border-color: var(--line);
+}
+
+.picker--inline select {
+  padding: 6px 25px 6px 10px;
+  font-size: 11.5px;
+}
+
+.picker--inline .picker__control .lucide {
+  right: 9px;
+  font-size: 10px;
+}
+
+/* What the version list is doing, or why it is empty. Out of the layout
+   entirely when it has nothing to say — a permanently reserved line
+   under the box is dead space on every visit, and this speaks on few. */
+.candidate__note {
+  margin-top: 8px;
+}
+
+.candidate__note:empty {
+  display: none;
+}
+
+.candidate__note--error {
+  color: var(--danger);
+}
+
+/* What has already been produced for this context, above the button
+   that would produce another (req 5). Scoped by project/platform/
+   version, not by user: each row names its producer instead. Panel,
+   bar and rows all come from the list primitives above. */
+.files__list {
+  max-height: 168px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+/* The actions sit beside a block of wrapped text rather than beside a
+   single line, so this row centres on them where the others share a
+   baseline. */
+.filerow {
+  align-items: center;
+}
+
+/* The identity of the file — when, by whom, how big — as one column, so
+   the two actions sit at a single predictable end of every row. */
+.filerow__main {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 10px;
+  min-width: 0;
+}
+
+.filerow__scale {
+  flex-basis: 100%;
+}
+
+.filerow__actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+
+.filerow__actions .submit {
+  gap: 6px;
+  padding: 3px 9px;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.files__empty {
+  padding: 12px;
+}
+
+/* Where the run stands, and the log it is producing: one terminal
+   panel, its chrome bar carrying the state and the result tally so
+   neither costs a row of the console's own height (req 6). */
+.runpanel {
+  position: relative;
+  background-color: rgba(2, 14, 20, 0.72);
+  transition: border-color 0.3s ease;
+}
+
+.runpanel__bar {
+  position: relative;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  overflow: hidden;
+  /* Taller than the shared floor, and deliberately: held at the height
+     the rocket and label alone give it, so the bar does not grow the
+     moment the stop button joins them. */
+  min-height: 38px;
+}
+
+/* Stop, at chrome scale: a bar control rather than one of the card's
+   command bars, and the one destructive thing on this card — so it is
+   the only control here that reads in the danger colour rather than the
+   cyan every other action shares. After --ghost and --compact, so its
+   colour, padding and size all win. */
+.runpanel__stop {
+  /* The bar's far end, the same end the chips take — the two never show
+     together, so neither has to give way. */
+  margin-left: auto;
+  gap: 6px;
+  padding: 3px 9px;
+  border-color: rgba(255, 107, 122, 0.4);
+  color: var(--danger);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.runpanel__stop .lucide {
+  font-size: 12px;
+}
+
+/* --ghost's hover flips to cyan, which would undo the warning this
+   button is carrying; it brightens in its own colour instead. */
+.runpanel__stop:hover:not(:disabled),
+.runpanel__stop:focus-visible:not(:disabled) {
+  border-color: var(--danger);
+  background-color: rgba(255, 107, 122, 0.12);
+  color: var(--danger);
+}
+
+/* The busy spinner is sized and coloured for a full command bar: at 13px
+   it would push the bar taller for as long as the cancel is in flight,
+   and cyan would read as a different control than the one just pressed. */
+.runpanel__stop .spinner {
+  width: 10px;
+  height: 10px;
+  vertical-align: -1px;
+  border-width: 1px;
+  border-color: rgba(255, 107, 122, 0.25);
+  border-top-color: var(--danger);
+}
+
+.runpanel__stop .submit__label .spinner {
+  margin-right: 6px;
+}
+
+/* Cancelling: still the live thing in the bar, so it holds its colour
+   and only gives up the affordance. */
+.runpanel__stop:disabled {
+  border-color: rgba(255, 107, 122, 0.25);
+  color: rgba(255, 107, 122, 0.7);
+  cursor: default;
+}
+
+.runpanel__rocket {
+  flex: none;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--muted);
+  transition: color 0.3s ease, filter 0.3s ease;
+}
+
+/* Orbitron is otherwise the card's own headline face; the run's state
+   earns it, being the one thing here that keeps changing. */
+.runpanel__value {
+  white-space: nowrap;
+  font-family: Orbitron, Barlow, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--muted);
+  transition: color 0.3s ease;
+}
+
+/* Running: the rocket climbs, the label breathes, and a cyan sweep
+   crosses the bar — saying "working" without a progress bar the card
+   has no percentage to fill. */
+.runpanel[data-tone="busy"] {
+  border-color: var(--cyan-dim);
+}
+
+.runpanel[data-tone="busy"] .runpanel__rocket {
+  color: var(--cyan);
+  filter: drop-shadow(0 0 8px rgba(34, 230, 245, 0.9));
+  animation: rocket-lift 2s ease-in-out infinite;
+}
+
+.runpanel[data-tone="busy"] .runpanel__value {
+  color: var(--cyan);
+  animation: status-glow 1.8s ease-in-out infinite;
+}
+
+.runpanel[data-tone="busy"] .runpanel__bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(34, 230, 245, 0.14),
+    transparent
+  );
+  animation: bar-sweep 2.4s linear infinite;
+  pointer-events: none;
+}
+
+.runpanel[data-tone="ok"] {
+  border-color: rgba(53, 224, 127, 0.45);
+}
+
+.runpanel[data-tone="ok"] .runpanel__rocket {
+  color: var(--ok);
+  filter: drop-shadow(0 0 8px rgba(53, 224, 127, 0.9));
+}
+
+.runpanel[data-tone="ok"] .runpanel__value {
+  color: var(--ok);
+  text-shadow: 0 0 14px rgba(53, 224, 127, 0.55);
+}
+
+.runpanel[data-tone="bad"] {
+  border-color: rgba(255, 107, 122, 0.45);
+}
+
+.runpanel[data-tone="bad"] .runpanel__rocket {
+  color: var(--danger);
+  filter: drop-shadow(0 0 8px rgba(255, 107, 122, 0.8));
+}
+
+.runpanel[data-tone="bad"] .runpanel__value {
+  color: var(--danger);
+  text-shadow: 0 0 14px rgba(255, 107, 122, 0.5);
+}
+
+/* One-shot on the way into a terminal state, so the outcome registers
+   even when the operator was reading the log rather than the bar. */
+.runpanel--flash[data-tone="ok"] {
+  animation: flash-ok 0.6s ease-out;
+}
+
+.runpanel--flash[data-tone="bad"] {
+  animation: flash-bad 0.6s ease-out;
+}
+
+.runpanel--flash[data-tone="bad"] .runpanel__rocket {
+  animation: shake 0.4s ease-in-out;
+}
+
+@keyframes rocket-lift {
+  50% {
+    transform: translateY(-3px) rotate(-6deg);
+  }
+}
+
+@keyframes status-glow {
+  50% {
+    text-shadow: 0 0 16px rgba(34, 230, 245, 0.75);
+  }
+}
+
+@keyframes bar-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes flash-ok {
+  from {
+    box-shadow: 0 0 0 0 rgba(53, 224, 127, 0.55);
+  }
+  to {
+    box-shadow: 0 0 0 14px rgba(53, 224, 127, 0);
+  }
+}
+
+@keyframes flash-bad {
+  from {
+    box-shadow: 0 0 0 0 rgba(255, 107, 122, 0.55);
+  }
+  to {
+    box-shadow: 0 0 0 14px rgba(255, 107, 122, 0);
+  }
+}
+
+@keyframes shake {
+  25% {
+    transform: translateX(-3px);
+  }
+  75% {
+    transform: translateX(3px);
+  }
+}
+
+/* Per-unit outcome of a finished run, one chip per status seen. Rides
+   at the far end of the panel bar, so it costs no height of its own. */
+.chips {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  /* Pushed to the bar's far end, and still to the right of its own line
+     when the bar has to wrap. */
+  margin-left: auto;
+}
+
+.chips[hidden] {
+  display: none;
+}
+
+.chip {
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: var(--fs-chip);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.chip[data-status="ok"] {
+  border-color: rgba(53, 224, 127, 0.45);
+  color: var(--ok);
+}
+
+.chip[data-status="missing_files"] {
+  border-color: var(--cyan-dim);
+  color: var(--cyan);
+}
+
+.chip[data-status="error"],
+.chip[data-status="not_cloned"] {
+  border-color: rgba(255, 107, 122, 0.45);
+  color: var(--danger);
+}
+
+/* The worker's own log, streamed line by line while the run is live —
+   the point of this card, so it gets the height. The panel around it
+   draws the frame and the fill. */
+.console {
+  height: clamp(280px, 46vh, 460px);
+  overflow-y: auto;
+  padding: 10px 12px;
+  font-family: "SFMono-Regular", Menlo, Consolas, "Liberation Mono",
+    monospace;
+  font-size: var(--fs-value);
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+/* On the run view the height comes from the fill chain instead: the log
+   is what is left after the bar and the actions, and the floor is only a
+   guard for viewports too short to give it anything. */
+.shell--run .console {
+  height: auto;
+  flex: 1 1 auto;
+  min-height: 140px;
+}
+
+/* The console is the only thing on this card that gives up height; the
+   bar above it and the strip and controls below it keep theirs. */
+.shell--run .runpanel__bar,
+.shell--run #run-message,
+.shell--run .actions {
+  flex: none;
+}
+
+.console:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--cyan-dim);
+}
+
+/* Nothing streamed yet: centre the standing-by note rather than open
+   on an empty slab. */
+.console--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.console__idle .lucide {
+  font-size: 15px;
+}
+
+.console__line {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* The worker logs "%(asctime)s %(levelname)-8s %(message)s", so the
+   three parts can carry their own weight: the clock recedes, the level
+   colours the row, and the message reads at full contrast. */
+.console__time {
+  color: var(--muted);
+}
+
+.console__level {
+  color: var(--muted);
+}
+
+.console__level[data-level="INFO"] {
+  color: var(--cyan);
+}
+
+.console__level[data-level="WARNING"] {
+  color: var(--warn);
+}
+
+.console__level[data-level="ERROR"],
+.console__level[data-level="CRITICAL"] {
+  color: var(--danger);
+}
+
+/* A failed line stays findable when scrolling back through a long run. */
+.console__line[data-level="ERROR"],
+.console__line[data-level="CRITICAL"] {
+  margin: 0 -12px;
+  padding: 0 12px;
+  background-color: rgba(255, 107, 122, 0.08);
+}
+
+.units__empty {
+  padding: 22px 12px;
+}
+
+/* ------------------------------------------ core system model card */
+
+/* The only view that is a deck of cards rather than one card. Each
+   panel carries the frame itself, so a shell around them would just be
+   a border drawn around borders — the chrome comes off here rather
+   than out of the markup, which the other five views still need. Width
+   comes from the shared full-bleed step above. */
+.card[data-view="model"] {
+  padding: 0;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.card[data-view="model"]::before,
+.card[data-view="model"]::after,
+.card[data-view="model"] .card__blur,
+.card[data-view="model"] .card__corners {
+  display: none;
+}
+
+/* Two columns of two: what the model is on the left, what was read to
+   build it on the right, each pair a short panel over a list. */
+.model__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: stretch;
+  /* Wider than a plain gutter: the panels' corner brackets glow past
+     their own edges, and at 14px the neighbouring pairs ran together. */
+  gap: 22px;
+}
+
+/* The strip and the grid are held back until the file has been read,
+   and a display of their own outranks the hidden attribute. */
+.model__grid[hidden],
+.context[hidden] {
+  display: none;
+}
+
+.model__column {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Sized by the viewport rather than by its content, the way the run
+   card is: the shell stretches and stops height-centring, so the two
+   lists share out whatever the header and the short panels leave and
+   the whole deck lands on one screen. */
+.shell--model .card,
+.shell--model .card__body,
+.shell--model #view-model:not([hidden]) {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* The grid is the only thing that gives up height. Its single row has
+   to be bounded too — an auto row sizes to its content and overflows
+   the flex box it was just fitted into, taking the bottom panel of
+   each column off the screen. */
+.shell--model .model__grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+/* Everything above and below it keeps its own height: a flex item
+   shrinks by default, and the context strip clips its own text rather
+   than pushing back. */
+.shell--model .context,
+.shell--model .model__loading,
+.shell--model #model-message {
+  flex: none;
+}
+
+/* The header rows are centred, which leaves the line's right end free:
+   the download is hung there, out of the deck's way and costing it no
+   height of its own. */
+#view-model {
+  position: relative;
+}
+
+.model__download {
+  position: absolute;
+  /* Centred on the strip it shares the line with. */
+  top: 12px;
+  right: 0;
+  z-index: 2;
+  border-radius: 999px;
+}
+
+/* One panel per part of the file: a chrome bar naming it, a body
+   holding its rows. With no shell around the deck each panel is a card
+   in its own right, and is drawn with the card frame itself — border,
+   frosted fill and brackets all come from the shared rules above, so
+   a panel of the deck reads exactly as a stage card does. What is left
+   here is only how the panel is laid out and how it shares the column. */
+.mpanel {
+  display: flex;
+  flex-direction: column;
+  /* Short panels keep the height their content asks for. */
+  flex: none;
+  min-height: 0;
+}
+
+/* The lists share out whatever the fixed panels leave: the inventory
+   takes the rest of the left column, the log and the validation errors
+   split the right, and the two columns end level however long their
+   lists are. Basis 0, not auto — a 26-row log measured at its content
+   height would claim the whole column and squeeze its neighbour to
+   nothing. */
+.mpanel--grow {
+  flex: 1 1 0;
+}
+
+/* Of the two lists in the right column the errors are the shorter: a
+   clean model leaves the panel empty and a failing one names a handful
+   of files, while the log lists every file read. So the split is not
+   even — the errors take a third of the column and the log the other
+   two. Grow alone: the basis stays 0 from --grow, so neither panel is
+   sized by its content. */
+.mpanel--minor {
+  flex-grow: 0.5;
+}
+
+/* Above the blur layer, and rounded to the frame's inner edge — the
+   panel can no longer clip them itself, since the brackets sit outside
+   its box. */
+.mpanel__bar {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  border-radius: 12px 12px 0 0;
+}
+
+/* Long lists scroll inside their panel rather than stretching the
+   column they share with the others. */
+.mpanel__body {
+  position: relative;
+  z-index: 1;
+  flex: 1 1 auto;
+  min-height: 0;
+  border-radius: 0 0 12px 12px;
+  overflow-y: auto;
+}
+
+/* What the file amounts to, as the card's headline numbers: the four
+   counts its own metadata carries. */
+.scale {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  border-radius: 0 0 12px 12px;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background-color: var(--line);
+}
+
+.scale__cell {
+  padding: 12px;
+  background-color: rgba(2, 14, 20, 0.55);
+  text-align: center;
+}
+
+.scale__value {
+  display: block;
+  font-family: Orbitron, Barlow, sans-serif;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--cyan);
+}
+
+.scale__label {
+  display: block;
+  margin-top: 4px;
+}
+
+/* A record from the file: its name on the first line, whatever the
+   record is made of on the lines under it. Box, head line and the
+   name/value pair all come from the list primitives. */
+.mrow__head {
+  gap: 8px;
+}
+
+/* The record's own detail — QoS, hierarchy, an endpoint pair — set
+   small and muted under the name it belongs to. */
+.mrow__detail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 8px;
+  margin-top: 6px;
+}
+
+/* The log's rows come in runs that share a unit, so the run carries a
+   heading and the rows carry only what differs. It is the panel's own
+   bar at row scale — same face and colour, a lighter draw of the same
+   tint — so a group reads as a section of the list rather than as
+   another record in it. */
+.mgroup__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--line);
+  background-color: rgba(4, 22, 31, 0.34);
+}
+
+/* The unit's own name, as the repository spells it — body face, mixed
+   case, at row size. Orbitron's uppercase display cut is for chrome
+   that labels a box; this is a name read against the file names under
+   it, so it is set as they are and marked out by weight and colour
+   instead. */
+.mgroup__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: Barlow, sans-serif;
+  font-weight: 600;
+  font-size: var(--fs-row);
+  color: var(--cyan);
+}
+
+/* The one version every file under the heading was read at. */
+.mgroup__version {
+  flex: none;
+  font-size: var(--fs-value);
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+/* Files sit in from the panel's edge, so the status dots make a column
+   of their own inside the section instead of running along that edge. */
+.mgroup .mrow {
+  padding-left: 22px;
+}
+
+/* The heading takes the same indent as the rows it heads, so it starts
+   on the dots' column rather than out at the panel's edge. */
+.mgroup__head {
+  padding-left: 22px;
+}
+
+/* A group's last row is not the list's last row — another heading
+   follows it — so it keeps the rule the primitive drops from it. */
+.mgroup:not(:last-child) .mrow:last-child {
+  border-bottom: 1px solid var(--line);
+}
+
+/* Why a file could not be read: what kind of failure it was in a fixed
+   first column, the message itself in the second. A grid rather than a
+   flex line — wrapped, the message stays in its own column instead of
+   starting again at the row's left edge, so however long it runs the
+   pair still reads as one statement. One grid holds every reason the
+   row has, so the widest kind sets the column for all of them and the
+   messages start at one place rather than each at its own. */
+.mreasons {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 6px 8px;
+  margin-top: 6px;
+  font-size: var(--fs-detail);
+  color: var(--muted);
+}
+
+/* Held to its own text rather than stretched down the message beside
+   it, which can run to several lines. */
+.mreasons .chip {
+  justify-self: start;
+  line-height: 1;
+}
+
+.mreasons__text {
+  line-height: 1.45;
+}
+
+/* An acquisition status, as the dot in front of the row it grades —
+   the log's own colour key, straight from the file. */
+.dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: var(--muted);
+}
+
+.dot[data-level="ok"] {
+  background-color: var(--ok);
+  box-shadow: 0 0 6px rgba(53, 224, 127, 0.7);
+}
+
+.dot[data-level="missing_data"] {
+  background-color: var(--warn);
+  box-shadow: 0 0 6px rgba(255, 196, 107, 0.7);
+}
+
+.dot[data-level="error"] {
+  background-color: var(--danger);
+  box-shadow: 0 0 6px rgba(255, 107, 122, 0.7);
+}
+
+/* The acquisition statuses the file reports, alongside the run's own
+   unit outcomes already keyed above. */
+.chip[data-status="OK"] {
+  border-color: rgba(53, 224, 127, 0.45);
+  color: var(--ok);
+}
+
+.chip[data-status="MISSING_DATA"] {
+  border-color: rgba(255, 196, 107, 0.45);
+  color: var(--warn);
+}
+
+.chip[data-status="ERROR"] {
+  border-color: rgba(255, 107, 122, 0.45);
+  color: var(--danger);
+}
+
+/* A model the run found nothing wrong with. As a muted line in an
+   otherwise empty box it read like a panel that had failed to load, so
+   the pass states itself instead: the log's own OK green, a sealed
+   glyph, and one line naming what passed. Centred in whatever height
+   the panel has — min-height rather than height, so it still centres
+   when the panel is the short one of its column and never clips its
+   own padding. */
+.mclear {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  box-sizing: border-box;
+  min-height: 100%;
+  padding: 26px 18px;
+  text-align: center;
+}
+
+/* The glyph in a ring of its own colour, lit from behind: the same
+   green-on-dark mark the run's OK statuses carry, drawn at the scale a
+   whole panel's worth of good news deserves. */
+.mclear__seal {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(53, 224, 127, 0.45);
+  border-radius: 50%;
+  background-color: rgba(53, 224, 127, 0.08);
+  box-shadow: 0 0 18px rgba(53, 224, 127, 0.18);
+  color: var(--ok);
+  font-size: 19px;
+}
+
+/* The verdict, set like the bar that names the panel it fills. */
+.mclear__title {
+  margin: 0;
+  font-family: Orbitron, Barlow, sans-serif;
+  font-weight: 600;
+  font-size: var(--fs-sub);
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--ok);
+}
+
+/* What the verdict covers, held to a readable measure so it wraps into
+   two short lines rather than one that runs the panel's full width. */
+.mclear__note {
+  margin: 0;
+  max-width: 34ch;
+  font-size: var(--fs-info);
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+/* Loading the file: the same standing-by line the boot and console
+   cards show, given the room a whole card's worth of waiting deserves. */
+.model__loading {
+  padding: 60px 0;
+}
+
+.model__loading[hidden] {
+  display: none;
+}
+
+/* Four cells is one too many for a narrow strip — the others ellipsise
+   down to nothing. The timestamp is the least load-bearing of them, and
+   dropping it lets the context itself be read. */
+@media (max-width: 560px) {
+  #model-context .context__cell:last-child {
+    display: none;
+  }
+}
+
+/* One column under 860px: two columns of rows this narrow are
+   unreadable. Stacked, the deck is taller than any viewport, so it goes
+   back to sizing by content and letting the page scroll rather than
+   crushing four panels onto one screen — and the download rejoins the
+   flow, since there is no longer a margin to hang it in. */
+@media (max-width: 860px) {
+  .model__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shell--model .model__grid,
+  .mpanel--grow {
+    flex: none;
+  }
+
+  .shell--model .model__grid {
+    grid-template-rows: none;
+  }
+
+  .mpanel__body {
+    max-height: 320px;
+  }
+
+  .model__download {
+    position: static;
+    margin: 0 auto 22px;
+  }
+}
+
+/* Who is signed in. */
+.sessionbar {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  font-size: 15.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sessionbar[hidden] {
+  display: none;
+}
+
+.sessionbar > .lucide {
+  flex: none;
+  font-size: 21px;
+  color: var(--cyan);
+  opacity: 0.85;
+}
+
+.sessionbar__user {
+  max-width: 60%;
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sessionbar__divider {
+  flex: none;
+  width: 1px;
+  height: 21px;
+  background-color: var(--line);
+}
+
+.linkbtn {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.linkbtn:hover,
+.linkbtn:focus-visible {
+  color: var(--cyan);
+}
+
+/* Under the modal's last field, explaining what connecting commits to. */
+.hint {
+  margin-top: 2px;
+  text-align: center;
+}
+
+.boot {
+  padding: 6px 0 2px;
+}
