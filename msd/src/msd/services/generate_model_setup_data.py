@@ -5,10 +5,6 @@ the source code repository over the network. It scans the unit directories
 already present under `dest_root` (produced by CloneSoftwareUnits
 or an earlier run) and builds the Model Setup Data artifact from them. Units
 that were not cloned are recorded as errors, not fetched on the fly.
-
-The per-unit scans run up to UNIT_CONCURRENCY units at once (see
-services/concurrency.py); the acquired-file records come back in inventory
-order.
 """
 
 from __future__ import annotations
@@ -28,7 +24,6 @@ from msd.ports.source_code_repository import ISourceCodeRepository
 from msd.services.acquire_project_context import AcquireProjectContext
 from msd.services.analyze_software_units import AnalyzeSoftwareUnits
 from msd.services.build_software_unit_inventory import BuildSoftwareUnitInventory
-from msd.services.concurrency import run_units_concurrently
 from msd.services.progress import PHASE_FINALIZE, PHASE_SCAN
 from msd.services.validate_mandatory_fields import ValidateMandatoryFields
 
@@ -101,17 +96,27 @@ class GenerateModelSetupData:
         # that were actually acquired (req 11).
         inventory = self._inventory.execute(context, candidate)
 
-        units = inventory.units
-        # The pool helper reports (0, N) up front; the acquired-file records
-        # are flattened back into inventory order below, so the artifact lists
-        # a unit's files together regardless of which unit finished first.
         dest_root.mkdir(parents=True, exist_ok=True)
-        records_per_unit = run_units_concurrently(
-            units, lambda unit: self._scan_one(unit, dest_root), PHASE_SCAN, progress
-        )
-        acquired_files: List[AcquiredFile] = [
-            record for unit_records in records_per_unit for record in unit_records
-        ]
+        total = len(inventory.units)
+        report = progress or (lambda *_: None)
+        report(PHASE_SCAN, 0, total)
+        acquired_files: List[AcquiredFile] = []
+        for index, unit in enumerate(inventory.units):
+            clone_path = dest_root / unit.unit_name
+            if not clone_path.is_dir():
+                logger.warning("generate: %s %s is not cloned under %s, recording errors",
+                               unit.unit_name, unit.version, dest_root)
+                acquired_files.extend(self._not_cloned_records(unit))
+            else:
+                found = self._source_repo.scan_cloned_unit(unit, clone_path)
+                found_names = {Path(f.file_path).name for f in found}
+                acquired_files.extend(found)
+                mandatory = self._source_repo.list_mandatory_files(unit.unit_name)
+                missing = missing_mandatory_file_records(unit, mandatory, found_names, datetime.now())
+                acquired_files.extend(missing)
+                logger.info("generate: %s %s scanned %d file(s), %d missing mandatory",
+                            unit.unit_name, unit.version, len(found), len(missing))
+            report(PHASE_SCAN, index + 1, total)
 
         # The analyze step works the same inventory and carries on the same
         # progress: its phase follows the scan's.
@@ -119,8 +124,7 @@ class GenerateModelSetupData:
 
         # Everything after the per-unit work is one unit of progress: validate,
         # build the graph, write the file.
-        if progress is not None:
-            progress(PHASE_FINALIZE, 0, 1)
+        report(PHASE_FINALIZE, 0, 1)
         validation_errors = self._validate.execute([*acquired_files, *extracted_topics], context)
 
         graph = self._writer.build_graph(context, inventory, extracted_topics, self._config_repo)
@@ -135,26 +139,8 @@ class GenerateModelSetupData:
         )
         self._writer.write(data, output_path)
         logger.info("generate: wrote model setup data to %s", output_path)
-        if progress is not None:
-            progress(PHASE_FINALIZE, 1, 1)
+        report(PHASE_FINALIZE, 1, 1)
         return data
-
-    def _scan_one(self, unit: SoftwareUnitVersion, dest_root: Path) -> List[AcquiredFile]:
-        """The per-unit scan: the mandatory-file records (found plus missing)
-        for a cloned unit, or not-cloned error records for one the clone step
-        did not produce (req 14, 15)."""
-        clone_path = dest_root / unit.unit_name
-        if not clone_path.is_dir():
-            logger.warning("generate: %s %s is not cloned under %s, recording errors",
-                           unit.unit_name, unit.version, dest_root)
-            return self._not_cloned_records(unit)
-        found = self._source_repo.scan_cloned_unit(unit, clone_path)
-        found_names = {Path(f.file_path).name for f in found}
-        mandatory = self._source_repo.list_mandatory_files(unit.unit_name)
-        missing = missing_mandatory_file_records(unit, mandatory, found_names, datetime.now())
-        logger.info("generate: %s %s scanned %d file(s), %d missing mandatory",
-                    unit.unit_name, unit.version, len(found), len(missing))
-        return [*found, *missing]
 
     def _not_cloned_records(self, unit: SoftwareUnitVersion) -> List[AcquiredFile]:
         now = datetime.now()

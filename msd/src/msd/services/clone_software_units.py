@@ -3,9 +3,6 @@
 Deliberately a standalone step between selection and generating: it only touches
 the source code repository. Units already present at the destination are not
 re-cloned, so a later generate step can reuse previously cloned repositories.
-
-The per-unit clones run up to UNIT_CONCURRENCY units at once (see
-services/concurrency.py); the results come back in inventory order.
 """
 
 from __future__ import annotations
@@ -25,7 +22,6 @@ from msd.ports.source_code_repository import (
 )
 from msd.services.acquire_project_context import AcquireProjectContext
 from msd.services.build_software_unit_inventory import BuildSoftwareUnitInventory
-from msd.services.concurrency import run_units_concurrently
 from msd.services.progress import PHASE_CLONE
 
 logger = logging.getLogger(__name__)
@@ -78,25 +74,27 @@ class CloneSoftwareUnits:
         # system version pins (req 11).
         inventory = self._inventory.execute(context_result.context, candidate)
 
-        units = inventory.units
-        # The pool helper reports (0, N) before the first (possibly long)
-        # clone, so the caller's bar can appear immediately.
         dest_root.mkdir(parents=True, exist_ok=True)
-        return run_units_concurrently(units, lambda unit: self._clone_one(unit, dest_root), PHASE_CLONE, progress)
-
-    def _clone_one(self, unit: SoftwareUnitVersion, dest_root: Path) -> CloneUnitResult:
-        """The per-unit clone: a non-empty checkout already at the destination
-        is kept as is, everything else is cloned, and a per-unit
-        access/authorization/integrity failure is recorded instead of aborting
-        the phase (req 16)."""
-        unit_dir = dest_root / unit.unit_name
-        if unit_dir.is_dir() and any(unit_dir.iterdir()):
-            logger.info("clone: %s %s already present at %s, skipping", unit.unit_name, unit.version, unit_dir)
-            return CloneUnitResult(unit=unit, status=CloneStatus.ALREADY_PRESENT, detail=str(unit_dir))
-        try:
-            self._source_repo.clone_unit(unit, dest_root)
-            logger.info("clone: %s %s cloned to %s", unit.unit_name, unit.version, unit_dir)
-            return CloneUnitResult(unit=unit, status=CloneStatus.CLONED, detail=str(unit_dir))
-        except (SourceRepoAccessError, SourceRepoAuthError, SourceRepoIntegrityError) as exc:
-            logger.warning("clone: %s %s failed: %s", unit.unit_name, unit.version, exc)
-            return CloneUnitResult(unit=unit, status=CloneStatus.ERROR, detail=str(exc))
+        total = len(inventory.units)
+        # Reported before the first (possibly long) clone, so the caller's bar
+        # can appear immediately.
+        report = progress or (lambda *_: None)
+        report(PHASE_CLONE, 0, total)
+        results: List[CloneUnitResult] = []
+        for index, unit in enumerate(inventory.units):
+            unit_dir = dest_root / unit.unit_name
+            if unit_dir.is_dir() and any(unit_dir.iterdir()):
+                logger.info("clone: %s %s already present at %s, skipping", unit.unit_name, unit.version, unit_dir)
+                results.append(
+                    CloneUnitResult(unit=unit, status=CloneStatus.ALREADY_PRESENT, detail=str(unit_dir))
+                )
+            else:
+                try:
+                    self._source_repo.clone_unit(unit, dest_root)
+                    logger.info("clone: %s %s cloned to %s", unit.unit_name, unit.version, unit_dir)
+                    results.append(CloneUnitResult(unit=unit, status=CloneStatus.CLONED, detail=str(unit_dir)))
+                except (SourceRepoAccessError, SourceRepoAuthError, SourceRepoIntegrityError) as exc:
+                    logger.warning("clone: %s %s failed: %s", unit.unit_name, unit.version, exc)
+                    results.append(CloneUnitResult(unit=unit, status=CloneStatus.ERROR, detail=str(exc)))
+            report(PHASE_CLONE, index + 1, total)
+        return results
