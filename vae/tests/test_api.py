@@ -10,10 +10,10 @@ from fakes.fake_source_code_repository import FakeSourceCodeRepository
 from fakes.fake_task_output_store import FakeTaskOutputStore
 from fakes.fake_task_runner import FakeTaskRunner
 
-from vae import api as vae_api
 from vae.adapters.ldap_auth_repository import LdapAuthRepository
 from vae.api import create_app
 from vae.composition import Components
+from vae.domain.task_status import TaskStatus
 
 from msd.adapters.filesystem_model_setup_data_catalog import FilesystemModelSetupDataCatalog
 from msd.domain.data_source import DataSourceConfig, SourceType
@@ -375,10 +375,7 @@ def _completed_task_id(components: Components, client) -> str:
     return client.post("/api/msd/run", json=SELECTION).get_json()["task_id"]
 
 
-def test_output_stream_serves_lines_and_terminal_status(monkeypatch):
-    # Zero grace: with the default 60s the stream would stay open after the
-    # terminal state, and the test client consumes generators to exhaustion.
-    monkeypatch.setattr(vae_api, "_OUTPUT_STREAM_TERMINAL_GRACE_SECONDS", 0)
+def test_task_state_serves_status_and_lines():
     components = _components()
     client = _client(components)
     _login(client)
@@ -386,51 +383,21 @@ def test_output_stream_serves_lines_and_terminal_status(monkeypatch):
     components.task_output_store.append(task_id, "clone: nav_app 1.0.0 cloned to /ws")
     components.task_output_store.append(task_id, "generate: wrote model setup data to /ws/model_setup_data.json")
 
-    resp = client.get(f"/api/msd/tasks/{task_id}/output")
+    resp = client.get(f"/api/msd/tasks/{task_id}")
 
     assert resp.status_code == 200
-    assert resp.content_type.startswith("text/event-stream")
-    body = resp.get_data(as_text=True)
-    assert "data: clone: nav_app 1.0.0 cloned to /ws" in body
-    assert "data: generate: wrote model setup data to /ws/model_setup_data.json" in body
-    status = body.index("event: status")
-    assert status > body.index("data: generate")  # lines precede the state
-    assert '"state": "SUCCESS"' in body[status:]
-    assert '"selection"' in body[status:]  # terminal payload carries the result
+    body = resp.get_json()
+    assert body["state"] == "SUCCESS"
+    assert body["result"]  # the terminal payload carries the run's result
+    assert body["lines"] == [
+        "clone: nav_app 1.0.0 cloned to /ws",
+        "generate: wrote model setup data to /ws/model_setup_data.json",
+    ]
 
 
-def test_output_stream_emits_status_on_state_changes(monkeypatch):
-    monkeypatch.setattr(vae_api, "_OUTPUT_STREAM_TERMINAL_GRACE_SECONDS", 0)
-    components = Components(
-        defaults=_DEFAULTS,
-        config_repo_factory=lambda ds: FakeConfigManagementRepository(),
-        source_repo_factory=lambda ds: FakeSourceCodeRepository(),
-        msd_task_runner=FakeTaskRunner(
-            run=lambda **ids: {"selection": {k: ids[k] for k in SELECTION}},
-            state_sequence=["PENDING", "STARTED"],
-        ),
-        auth_repo=LdapAuthRepository(),
-        task_output_store=FakeTaskOutputStore(),
-    )
-    client = _client(components)
-    _login(client)
-    task_id = _completed_task_id(components, client)
-
-    resp = client.get(f"/api/msd/tasks/{task_id}/output")
-
-    body = resp.get_data(as_text=True)
-    pending = body.index('"state": "PENDING"')
-    started = body.index('"state": "STARTED"')
-    success = body.rindex('"state": "SUCCESS"')
-    assert pending < started < success
-    assert '"selection"' in body[success:]  # terminal payload carries the result
-
-
-def test_output_stream_resumes_after_the_last_event_id(monkeypatch):
-    """The id is of the last line the client *received*, so resuming replays
-    nothing it already has. A client that reopens the stream itself (its own
-    re-dial after a drop) says where to resume in the query string."""
-    monkeypatch.setattr(vae_api, "_OUTPUT_STREAM_TERMINAL_GRACE_SECONDS", 0)
+def test_task_state_resumes_after_the_last_line_seen():
+    """`after` is the index of the last line the client holds, so the answer
+    carries only what is new — nothing it already has is replayed."""
     components = _components()
     client = _client(components)
     _login(client)
@@ -438,31 +405,28 @@ def test_output_stream_resumes_after_the_last_event_id(monkeypatch):
     for line in ("line one", "line two", "line three"):
         components.task_output_store.append(task_id, line)
 
-    resp = client.get(f"/api/msd/tasks/{task_id}/output?last_event_id=1")
+    resp = client.get(f"/api/msd/tasks/{task_id}?after=1")
 
-    body = resp.get_data(as_text=True)
-    assert "line one" not in body
-    assert "line two" not in body
-    assert "data: line three" in body
-    assert "event: status" in body  # state re-sent as a snapshot on reconnect
-    assert '"state": "SUCCESS"' in body
+    body = resp.get_json()
+    assert body["lines"] == ["line three"]
+    assert body["state"] == "SUCCESS"  # the status rides along with the lines
 
 
-def test_output_stream_pings_while_the_run_is_quiet(monkeypatch):
-    """Source analysis logs once per unit and nothing in between, so a live
-    stream can carry no lines and no state change for minutes. It still has
-    to say something: silence is indistinguishable from a dropped connection,
-    and a client that cannot tell the difference never reconnects."""
-    monkeypatch.setattr(vae_api, "_OUTPUT_STREAM_TICK_SECONDS", 0)
-    monkeypatch.setattr(vae_api, "_OUTPUT_STREAM_PING_SECONDS", 0)
-    monkeypatch.setattr(vae_api, "_OUTPUT_STREAM_TERMINAL_GRACE_SECONDS", 0)
+def test_task_state_reports_progress_while_the_state_holds():
+    """While the state sits on STARTED, the payload's progress field is what
+    advances — each poll reports the progress the task has published so far,
+    so the UI's bar moves without the state label ever changing."""
     components = Components(
         defaults=_DEFAULTS,
         config_repo_factory=lambda ds: FakeConfigManagementRepository(),
         source_repo_factory=lambda ds: FakeSourceCodeRepository(),
         msd_task_runner=FakeTaskRunner(
             run=lambda **ids: {"selection": {k: ids[k] for k in SELECTION}},
-            state_sequence=["STARTED", "STARTED"],
+            state_sequence=[
+                "PENDING",
+                TaskStatus("t", "STARTED", info={"percent": 10, "phase": "clone"}),
+                TaskStatus("t", "STARTED", info={"percent": 25, "phase": "clone"}),
+            ],
         ),
         auth_repo=LdapAuthRepository(),
         task_output_store=FakeTaskOutputStore(),
@@ -471,33 +435,37 @@ def test_output_stream_pings_while_the_run_is_quiet(monkeypatch):
     _login(client)
     task_id = _completed_task_id(components, client)
 
-    body = client.get(f"/api/msd/tasks/{task_id}/output").get_data(as_text=True)
+    first = client.get(f"/api/msd/tasks/{task_id}").get_json()
+    second = client.get(f"/api/msd/tasks/{task_id}").get_json()
+    third = client.get(f"/api/msd/tasks/{task_id}").get_json()
+    fourth = client.get(f"/api/msd/tasks/{task_id}").get_json()
 
-    assert "event: ping" in body
-    assert body.index("event: ping") < body.index('"state": "SUCCESS"')
+    assert first["state"] == "PENDING"
+    assert first.get("progress") is None
+    assert second["state"] == "STARTED"
+    assert second["progress"]["percent"] == 10
+    assert third["state"] == "STARTED"
+    assert third["progress"]["percent"] == 25
+    assert fourth["state"] == "SUCCESS"  # and the terminal payload ends it
 
 
-def test_output_stream_stays_open_after_the_terminal_status(monkeypatch):
-    """The terminal status is the terminator the client closes on, but the
-    server does not close first: it keeps the stream open (pinging) until the
-    grace elapses, so the final events always ride a connection nobody is
-    tearing down."""
-    monkeypatch.setattr(vae_api, "_OUTPUT_STREAM_TICK_SECONDS", 0.05)
-    monkeypatch.setattr(vae_api, "_OUTPUT_STREAM_TERMINAL_GRACE_SECONDS", 0.3)
-    monkeypatch.setattr(vae_api, "_OUTPUT_STREAM_TERMINAL_PING_SECONDS", 0.1)
+def test_task_state_bad_cursor_reads_as_hold_nothing():
+    """A malformed cursor cannot slice from the end of the log — it reads as
+    'hold nothing', so the answer is the whole list rather than its tail."""
     components = _components()
     client = _client(components)
     _login(client)
     task_id = _completed_task_id(components, client)
+    components.task_output_store.append(task_id, "line one")
+    components.task_output_store.append(task_id, "line two")
 
-    body = client.get(f"/api/msd/tasks/{task_id}/output").get_data(as_text=True)
+    body = client.get(f"/api/msd/tasks/{task_id}?after=not-a-number").get_json()
 
-    assert "event: ping" in body
-    assert body.index("event: ping") > body.index('"state": "SUCCESS"')
+    assert body["lines"] == ["line one", "line two"]
 
 
-def test_output_stream_requires_login():
-    resp = _client().get("/api/msd/tasks/does-not-exist/output")
+def test_task_state_requires_login():
+    resp = _client().get("/api/msd/tasks/does-not-exist")
 
     assert resp.status_code == 401
     assert resp.get_json() == {"error": "authentication required"}
@@ -791,6 +759,16 @@ def test_login_accepts_operator_role():
     assert body["role"] == "operator"
 
 
+def test_login_sets_persistent_session_cookie():
+    """A full browser close must not sever the session: without an expiry the
+    browser drops the cookie on close, and the tracked run goes with it (the
+    output survives in the store, the session link to it does not)."""
+    resp = _login(_client())
+
+    set_cookie = resp.headers["Set-Cookie"]
+    assert "Expires=" in set_cookie or "Max-Age=" in set_cookie
+
+
 def test_logout_clears_the_session_and_data_source_connection():
     client = _client()
     _login(client)
@@ -912,6 +890,31 @@ def test_run_sets_active_task_in_session():
     assert active_task["version_id"] == SELECTION["version_id"]
     assert active_task["candidate"] is None
     assert active_task["submitted_at"] > 0
+
+
+def test_session_survives_browser_restart_with_active_run():
+    """Closing the browser and reopening it sends the same — now persistent —
+    session cookie back: the reopened client must find the session intact —
+    sources, selection, and the run it was tracking. Both clients share the
+    app's components, since the data-source connections live in memory under
+    the session's conn_token, exactly as they do for one real browser."""
+    app = create_app(_components())
+    client = app.test_client()
+    _login(client)
+    _connect_data_sources(client)
+    client.post("/api/selection", json=SELECTION)
+    task_id = client.post("/api/msd/run", json=SELECTION).get_json()["task_id"]
+
+    cookie = client.get_cookie("session").value
+    reopened = app.test_client()
+    reopened.set_cookie("session", cookie)
+
+    body = reopened.get("/api/session").get_json()
+    assert body["authenticated"] is True
+    assert body["config_mgmt_db_connected"] is True
+    assert body["source_code_repo_connected"] is True
+    assert body["selection"] == SELECTION
+    assert body["active_task"]["task_id"] == task_id
 
 
 def test_active_task_remembers_the_candidate_the_run_is_evaluating():

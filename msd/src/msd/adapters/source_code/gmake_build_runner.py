@@ -4,7 +4,8 @@ generate their topic manifest and type-support code from an IDL-like
 definition at build time — if that hasn't run yet, ISourceAnalyzer would
 have nothing to scan.
 
-The `find_valid_makefile`/`run_regenerate_code` functions are pure helpers;
+The `run_regenerate_code` function is a pure helper; `find_valid_makefile`
+comes from mandatory_file_catalog.py, where it is shared with the scan.
 `GmakeBuildRunner` is the IBuildRunner adapter that combines them for
 AnalyzeSoftwareUnits.
 
@@ -17,28 +18,14 @@ from __future__ import annotations
 import logging
 import subprocess
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
-from msd.adapters.source_code.mandatory_file_catalog import MAKEFILE_RELATIVE_PATH, makefile_has_valid_include
+from msd.adapters.source_code.mandatory_file_catalog import find_valid_makefile
 from msd.ports.build_runner import IBuildRunner
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT_SECONDS = 300
-
-
-def find_valid_makefile(folder_path: Path, patterns: List[str]) -> Optional[Path]:
-    """Search recursively (not root-only) for a Makefile whose content
-    matches one of `patterns` (config.ini's makefile_include_patterns)."""
-    for makefile_path in sorted(folder_path.rglob(MAKEFILE_RELATIVE_PATH)):
-        try:
-            content = makefile_path.read_text(encoding="utf-8")
-        except OSError as exc:
-            logger.error("Error reading Makefile %s: %s", makefile_path, exc)
-            continue
-        if makefile_has_valid_include(content, patterns):
-            return makefile_path
-    return None
 
 
 def check_gmake_available() -> bool:

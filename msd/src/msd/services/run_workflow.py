@@ -29,6 +29,7 @@ from msd.domain.status import AcquisitionStatus, GenerateUnitStatus
 from msd.domain.validation import ValidationError
 from msd.services.clone_software_units import CloneSoftwareUnits, CloneUnitResult
 from msd.services.generate_model_setup_data import GenerateModelSetupData
+from msd.services.progress import PhaseProgress
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +133,18 @@ class RunWorkflow:
         run_id: str,
         produced_by: Optional[str] = None,
         candidate: Optional[CandidateUnitVersion] = None,
+        progress: Optional[Callable[[int, str], None]] = None,
     ) -> WorkflowResult:
+        """Run the clone → generate workflow.
+
+        `progress`, when given, is called with the run's overall percent
+        (0-100) and the phase being worked (one of the names in
+        services/progress.py) as the run advances — once per unit of work,
+        starting at 0. The workflow owns the percent arithmetic (see
+        PhaseProgress); the callback is only ever handed a finished number and
+        is expected to never fail the run (a dead progress channel must not
+        sink a run, so callers guard their own channel).
+        """
         run_dir = run_dir_under(workspace, project_id, platform_id, version_id, run_id)
         output_path = run_dir / MSD_JSON_FILE_NAME
         logger.info("workflow: clone+generate for %s/%s/%s into %s",
@@ -140,6 +152,11 @@ class RunWorkflow:
         if candidate is not None:
             logger.info("workflow: evaluating candidate %s %s in place of the version this system version defines",
                         candidate.unit_name, candidate.version)
+
+        # The phase reports the steps emit are (phase, done, total); the
+        # caller's callback takes the aggregated (percent, phase), so the two
+        # meet in PhaseProgress — which also holds the phase model itself.
+        phase_progress = PhaseProgress(progress).report if progress is not None else None
 
         # Both steps get the same candidate: each builds its own inventory, and
         # they must agree on which version was acquired (req 11). The run dir is
@@ -150,6 +167,7 @@ class RunWorkflow:
             platform_id=platform_id,
             version_id=version_id,
             candidate=candidate,
+            progress=phase_progress,
         )
 
         # The generate step (and the writer/parsers it builds) is handed the
@@ -164,6 +182,7 @@ class RunWorkflow:
             version_id=version_id,
             produced_by=produced_by,
             candidate=candidate,
+            progress=phase_progress,
         )
 
         return WorkflowResult(

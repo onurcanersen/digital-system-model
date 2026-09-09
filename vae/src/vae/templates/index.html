@@ -62,11 +62,20 @@
             <span class="stepper__name">Context</span>
           </button>
         </li>
+        <li class="stepper__item" id="stepper-files" data-state="todo">
+          <button type="button" class="stepper__button" data-stage="files">
+            <span class="stepper__mark">
+              <i class="lucide lucide-check"></i>
+              <span class="stepper__num">3</span>
+            </span>
+            <span class="stepper__name">Files</span>
+          </button>
+        </li>
         <li class="stepper__item" id="stepper-inventory" data-state="todo">
           <button type="button" class="stepper__button" data-stage="inventory">
             <span class="stepper__mark">
               <i class="lucide lucide-check"></i>
-              <span class="stepper__num">3</span>
+              <span class="stepper__num">4</span>
             </span>
             <span class="stepper__name">Inventory</span>
           </button>
@@ -75,7 +84,7 @@
           <button type="button" class="stepper__button" data-stage="run">
             <span class="stepper__mark">
               <i class="lucide lucide-check"></i>
-              <span class="stepper__num">4</span>
+              <span class="stepper__num">5</span>
             </span>
             <span class="stepper__name">Produce</span>
           </button>
@@ -84,7 +93,7 @@
           <button type="button" class="stepper__button" data-stage="model">
             <span class="stepper__mark">
               <i class="lucide lucide-check"></i>
-              <span class="stepper__num">5</span>
+              <span class="stepper__num">6</span>
             </span>
             <span class="stepper__name">Model</span>
           </button>
@@ -222,6 +231,39 @@
             </form>
           </section>
 
+          <!-- The Model Setup Data files already produced for the selected
+               project, platform and system version (SRS DSM-VAE req 5). A
+               confirmed context opens here rather than on the run console:
+               an existing file is offered before a run is spent making
+               another. Every producer's files, not just this user's — a file
+               belongs to the selection it describes, and each row names who
+                produced it. A row opens the model the file describes, and the
+                card's button goes on to the inventory. -->
+          <section class="view" id="view-files" hidden>
+            <!-- Hidden until the list has actually been read, so the card
+                 never claims there are none while the request is still out. -->
+            <div class="files" id="run-files-panel" hidden>
+              <span class="files__label"
+                ><i class="lucide lucide-hard-drive"></i>Previously produced</span
+              >
+              <ul class="files__list" id="run-files"></ul>
+              <p class="files__empty" id="run-files-empty" hidden>
+                No Model Setup Data produced for this context yet.
+              </p>
+            </div>
+
+            <p class="message" id="files-message" role="alert"></p>
+
+            <!-- The card's one button: a new production run for the
+                 selection, straight onto the console that watches it. -->
+            <div class="actions">
+              <button type="button" class="submit" id="files-primary">
+                <span class="submit__label">Produce new</span
+                ><i class="lucide lucide-arrow-right submit__arrow"></i>
+              </button>
+            </div>
+          </section>
+
           <!-- Software Unit Version Inventory (SRS DSM-MSD req 10): the
                units that run in the confirmed project/platform/version, and
                the version of each, read from the configuration management
@@ -316,57 +358,6 @@
             </div>
           </section>
 
-          <!-- The Model Setup Data files already produced for the selected
-               project, platform and system version, and the choice of which
-               to use (SRS DSM-VAE req 5). The Produce stage opens here rather
-               than on the console: an existing file is offered before a run
-               is spent making another. Every producer's files, not just this
-               user's — a file belongs to the selection it describes, and each
-               row names who produced it. -->
-          <section class="view" id="view-files" hidden>
-            <!-- Hidden until the list has actually been read, so the card
-                 never claims there are none while the request is still out. -->
-            <div class="files" id="run-files-panel" hidden>
-              <span class="files__label"
-                ><i class="lucide lucide-hard-drive"></i>Previously produced</span
-              >
-              <ul class="files__list" id="run-files"></ul>
-              <p class="files__empty" id="run-files-empty" hidden>
-                No Model Setup Data produced for this context yet.
-              </p>
-            </div>
-
-            <p class="message" id="files-message" role="alert"></p>
-
-            <!-- Producing is the decision this card leads to, so its button
-                 submits and hands over to the console rather than opening an
-                 idle card with a second button meaning the same thing. Beside
-                 it, the way back into the run this session is tracking —
-                 without it a finished run's log would be reachable by
-                 reloading the page and no other way. -->
-            <div class="actions">
-              <div class="actions__row">
-                <button
-                  type="button"
-                  class="submit submit--ghost submit--compact"
-                  id="files-log"
-                  hidden
-                >
-                  <i class="lucide lucide-rocket"></i
-                  ><span class="submit__label">Run log</span>
-                </button>
-                <button
-                  type="button"
-                  class="submit submit--grow"
-                  id="files-produce"
-                >
-                  <span class="submit__label">Produce new</span
-                  ><i class="lucide lucide-arrow-right submit__arrow"></i>
-                </button>
-              </div>
-            </div>
-          </section>
-
           <!-- Model Setup Data production (SRS DSM-VAE req 6, 8): follow the
                worker's own output and the task's state over one stream until
                it ends. Reached from the files card, which is what starts the
@@ -377,6 +368,24 @@
                  take height the log could have had. -->
             <div class="runpanel" id="run-status" data-tone="idle">
               <div class="runpanel__bar">
+                <!-- How far the run has gotten: the worker publishes the
+                     run's overall percent (its units of work done over the
+                     whole clone + generate), and it is the one number that
+                     moves while the state label does not. The fill is the
+                     bar's own backing, behind its content; the readout is
+                     appended to the state label. Hidden until the run has
+                     published a first one; a run that ends keeps whatever
+                     it last showed, so a failed run says where it stopped.
+                     First child and positioned: painted under the bar's
+                     other content, which sits on top of it. -->
+                <div
+                  class="runpanel__bar-progress"
+                  id="run-progress"
+                  hidden
+                  role="progressbar"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                ></div>
                 <i class="lucide lucide-rocket runpanel__rocket"></i>
                 <span class="runpanel__value" id="run-status-value"
                   >Not started</span
@@ -413,41 +422,26 @@
             <p class="message" id="run-message" role="alert"></p>
 
             <!-- One bar at a time: Start until a run produces a model, then
-                 Core System Model in its place — that one on the line below,
-                 sharing it with the way back to the list it came from. -->
+                 View Model in its place. -->
             <div class="actions">
               <button type="button" class="submit" id="run-start">
                 <span class="submit__label">Start production</span
                 ><i class="lucide lucide-arrow-right submit__arrow"></i>
               </button>
 
-              <div class="actions__row">
-                <!-- Back to the produced files. Always available, including
-                     while a run is still going: leaving the console does not
-                     stop the run, and the stream is re-attached on the way
-                     back in. Alone on this line until a run succeeds. -->
-                <button
-                  type="button"
-                  class="submit submit--ghost submit--compact"
-                  id="run-back"
-                >
-                  <i class="lucide lucide-arrow-left"></i
-                  ><span class="submit__label">Produced files</span>
-                </button>
-                <!-- What a finished run leads to: the model itself, not a file
-                     to open elsewhere. It takes the larger share of the line —
-                     it is what the run was spent on. Downloading it is one of
-                     the things the Core System Model card offers. -->
-                <button
-                  type="button"
-                  class="submit submit--ok submit--grow"
-                  id="run-model"
-                  hidden
-                >
-                  <span class="submit__label">Core System Model</span
-                  ><i class="lucide lucide-arrow-right submit__arrow"></i>
-                </button>
-              </div>
+              <!-- What a finished run leads to: the model itself, not a file
+                   to open elsewhere — it is what the run was spent on.
+                   Downloading it is one of the things the Core System Model
+                   card offers. -->
+              <button
+                type="button"
+                class="submit submit--ok"
+                id="run-model"
+                hidden
+              >
+                <span class="submit__label">View Model</span
+                ><i class="lucide lucide-arrow-right submit__arrow"></i>
+              </button>
             </div>
           </section>
 

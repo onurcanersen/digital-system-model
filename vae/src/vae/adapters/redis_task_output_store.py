@@ -29,3 +29,8 @@ class RedisTaskOutputStore(ITaskOutputStore):
 
     def lines(self, task_id: str) -> List[str]:
         return self._client.lrange(self._key(task_id), 0, -1)
+
+    def lines_since(self, task_id: str, index: int) -> List[str]:
+        # Clamped: a negative index would slice from the end of the log and
+        # replay the tail as if it were the head.
+        return self._client.lrange(self._key(task_id), max(index, 0), -1)

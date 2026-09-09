@@ -10,7 +10,8 @@
  *                 connection.
  *
  * Nothing is remembered in the browser except usernames, for prefill. What
- * survives a refresh lives on the server: Flask's session cookie holds
+ * survives a refresh — or a full browser close, since the session cookie is
+ * persistent — lives on the server: Flask's session cookie holds
  * username/role/conn_token/selection plus the UI record below, and the open
  * connections live in Components.connections under that token — so boot is a
  * single GET /api/session that decides which stage to resume at. A server
@@ -45,7 +46,11 @@
   }
 
   function taskUrl(taskId, suffix) {
-    return API.tasks + encodeURIComponent(taskId) + "/" + suffix;
+    var url = API.tasks + encodeURIComponent(taskId);
+    if (suffix) {
+      url += "/" + suffix;
+    }
+    return url;
   }
 
   /* Produced Model Setup Data files are addressed by the selection they
@@ -108,8 +113,8 @@
       title: "Software Unit Inventory",
       icon: "lucide-package"
     },
-    // What has already been produced for this context — the card the Produce
-    // stage opens on, so an existing file is offered before a run is spent
+    // What has already been produced for this context — the card a confirmed
+    // context opens on, so an existing file is offered before a run is spent
     // making another (SRS DSM-VAE req 5).
     files: {
       title: "Model Setup Data",
@@ -135,16 +140,16 @@
 
   // Which stage each card belongs to, for the stepper above the card. Boot
   // and sign-in have no stage — the stepper is what comes after signing in.
-  var STAGES = ["sources", "select", "inventory", "run", "model"];
-  // The Produce stage owns two cards — the files already produced, and the
-  // console of a run producing another — so both map to the same stage.
+  var STAGES = ["sources", "select", "files", "inventory", "run", "model"];
+  // Files is its own stage between Context and Inventory: the produced files
+  // for the confirmed context, before the inventory of what a run would use.
   var STAGE_OF = {
     sources: { index: 0, complete: false },
     select: { index: 1, complete: false },
-    inventory: { index: 2, complete: false },
-    files: { index: 3, complete: false },
-    run: { index: 3, complete: false },
-    model: { index: 4, complete: false }
+    files: { index: 2, complete: false },
+    inventory: { index: 3, complete: false },
+    run: { index: 4, complete: false },
+    model: { index: 5, complete: false }
   };
 
   var VIEWS = [
@@ -208,13 +213,14 @@
     // clears it.
     candidate: null,
     // Every Model Setup Data file produced for the current selection, as the
-    // server last listed them (newest first). Null until the Produce card has
+    // server last listed them (newest first). Null until the files card has
     // asked; [] means the selection has produced none.
     files: null,
-    // The produced file the Model card is showing — {run_id, produced_by,
+    // The produced file the files card has pointed at — {run_id, produced_by,
     // generated_at, ...} out of `files`, or the run that just succeeded — and
     // that file once read. The model card's only precondition, and its cache,
-    // so stepping back and forth between Produce and Model does not refetch it.
+    // so stepping back and forth between the files card and Model does not
+    // refetch it.
     modelFile: null,
     model: null,
     view: "boot"
@@ -302,8 +308,9 @@
     if (focusTarget && !focusTarget.disabled) {
       focusTarget.focus();
     }
-    // Every card change passes through here, and so does every change of the
-    // file on show — openFile ends on the model card.
+    // Every card change passes through here. A change of the picked file is
+    // reported the same way from the files card, where it happens without a
+    // card change at all.
     rememberUi();
   }
 
@@ -323,13 +330,14 @@
       el.stepper[key].item.setAttribute("data-state", drawn);
       // Reachability is not the drawn state: the sources stage is always open
       // once signed in, the context stage as soon as every source is
-      // connected, the inventory stage once a context is confirmed, and the
-      // model stage once a run has produced a file — including while
+      // connected, files/inventory/produce once a context is confirmed, and
+      // the model stage once a run has produced a file — including while
       // standing on an earlier card.
       var scoped = allConnected() && !!state.selection;
       var reachable =
         key === "sources" ||
         (key === "select" && allConnected()) ||
+        (key === "files" && scoped) ||
         ((key === "inventory" || key === "run") && scoped) ||
         (key === "model" && scoped && !!state.modelFile);
       el.stepper[key].button.disabled = !reachable;
@@ -463,7 +471,7 @@
     // The next sign-in starts a session of its own: nothing this one told the
     // server about where it stood applies to it.
     lastUi = null;
-    closeRunStream();
+    closeRunPoll();
   }
 
   /* The UI record as the server last heard it, so an unchanged one is not
@@ -812,9 +820,10 @@
   }
 
   /* The card the session says the user was on, when the state behind it is
-   * still there to show. The produced file the model card wants is looked up
-   * in the listing rather than trusted from the record — it is a file on
-   * disk, and another selection's run may have been cleaned up since. */
+   * still there to show. The produced file the user had pointed at is looked
+   * up in the listing rather than trusted from the record — it is a file on
+   * disk, and another selection's run may have been cleaned up since — and
+   * whatever card it was standing on is the one that shows it highlighted. */
   function resumeCard() {
     var saved = state.ui || {};
     // Standing on one of the earlier cards with a context already confirmed
@@ -828,25 +837,40 @@
     if (saved.view === "select") {
       return showView("select");
     }
-    if (saved.view === "model" && saved.model_file) {
+    // The run card is a place of its own: whether or not the run produced a
+    // file, the console is where the user stood — and a finished run records
+    // the file it made while the user is still on this card, so the file
+    // pointer below must not pull the resume off the console. With nothing
+    // tracked any more, resumeRunOrFiles lands on the files card as before.
+    if (saved.view === "run") {
+      return resumeRunOrFiles();
+    }
+    if (saved.model_file) {
       return loadFiles().then(function () {
         state.modelFile = fileByRun(saved.model_file);
-        if (state.modelFile) {
+        if (saved.view === "model" && state.modelFile) {
           return enterModel();
         }
-        return resumeRunOrInventory();
+        if (saved.view === "inventory") {
+          return enterInventory();
+        }
+        return enterFiles();
       });
+    }
+    if (saved.view === "inventory") {
+      return enterInventory();
     }
     if (saved.view === "files") {
       return enterFiles();
     }
-    return resumeRunOrInventory();
+    return resumeRunOrFiles();
   }
 
-  // A run still being tracked outranks the inventory: it is the thing that
-  // was happening when the page went away.
-  function resumeRunOrInventory() {
-    return state.activeTask ? enterRunConsole() : enterInventory();
+  // A run still being tracked outranks the landing card: it is the thing
+  // that was happening when the page went away. A confirmed context with
+  // nothing in flight lands on what it opens on — the produced files.
+  function resumeRunOrFiles() {
+    return state.activeTask ? enterRunConsole() : enterFiles();
   }
 
   function fileByRun(runId) {
@@ -1133,31 +1157,6 @@
 
   function paintUnits() {
     drawUnits();
-    lockListHeight();
-  }
-
-  /* Filtering must not resize the box. The height the full list settles at —
-   * its own height, or the CSS cap once it overflows — is held as a floor, so
-   * rows disappearing under a filter never make the card jump. Only the
-   * unfiltered list is measured; a narrowed one inherits that floor. */
-  function lockListHeight() {
-    if (el.unitFilter.value) {
-      return;
-    }
-    el.unitList.style.minHeight = "";
-    // Never above the stylesheet's own cap, which is viewport-relative: a
-    // floor measured on a tall window would otherwise hold the list at that
-    // height on a short one — min-height beats max-height — and push the
-    // card past the fold, which is the very thing the cap is there to stop.
-    var height = Math.min(el.unitList.offsetHeight, listHeightCap());
-    if (height) {
-      el.unitList.style.minHeight = height + "px";
-    }
-  }
-
-  function listHeightCap() {
-    var cap = parseFloat(window.getComputedStyle(el.unitList).maxHeight);
-    return isNaN(cap) ? Infinity : cap;
   }
 
   function drawUnits() {
@@ -1424,78 +1423,54 @@
 
   /* Model Setup Data production for the confirmed context (SRS DSM-VAE req
    * 6, 8): submit the run, then follow the worker's own log output and task
-   * state over one SSE stream until a terminal `status` arrives. The stream
-   * carries the lines, a `status` event on every state change (with a
-   * snapshot on every connect), a `ping` while the run is quiet, and the
-   * terminal `status` — so there is no polling, and re-dialing (with the
-   * last line id) resumes the lines it already delivered rather than
-   * replaying them. The client closes the stream on the terminal state; the
-   * server's own close after that is only a leak guard. */
-  var runSource = null;
+   * state by polling the task's state — status plus the lines the console
+   * does not have yet — every RUN_POLL_MS until a terminal state arrives.
+   * One short request per poll: nothing stays open, a dead API shows up as
+   * failed polls rather than a socket that silently dies, and a poll that
+   * finds a terminal state is the last one the card makes. */
+  var RUN_POLL_MS = 1000;
+  /* How many consecutive failed polls the run card tolerates before it stops
+   * asking and tells the operator to reload — the same give-up the old
+   * stream's re-dial count had, and the same message. */
+  var POLL_MAX_CONSECUTIVE_FAILURES = 5;
+  var runPollTaskId = null;
+  var runPollTimer = null;
+  /* The run's current state, as the last answered poll (or reset) said it:
+   * the card's state label, the buttons' visibility, and the terminal
+   * checks all read it. */
   var runState = null;
-  /* A run goes quiet for minutes at a time, and a connection that carries
-   * nothing for that long can be dropped somewhere on the path without a
-   * FIN — leaving EventSource holding a socket it still believes in, so it
-   * never reconnects on its own and the card sits on a state the run left
-   * long ago. The server's `ping` is what makes that detectable: nothing at
-   * all for STREAM_STALE_MS means the stream is gone whatever the browser
-   * thinks, and the answer is to open a new one from the last line seen. */
-  var STREAM_STALE_MS = 60000;
-  var STREAM_WATCH_MS = 10000;
-  var runStreamTaskId = null;
-  var runStreamAt = 0;
-  var runStreamWatch = null;
-  var runStreamRetrying = false;
-  /* Re-dial bookkeeping: how many consecutive re-opens came up with no event
-   * at all (a dead API, an expired session), the pending re-dial, and the
-   * point at which re-dialing is stopped in favour of telling the operator. */
-  var STREAM_REDIAL_MS = 1000;
-  var STREAM_REDIAL_MAX_FAILS = 5;
-  var runStreamFails = 0;
-  var runStreamRetryTimer = null;
-  var runStreamGivenUp = false;
-  /* Where a reopened stream resumes from. Kept in step with what the console
-   * is actually showing — resetConsole() clears it, so a console starting
-   * empty is refilled from the top. */
-  var runStreamLastId = null;
+  /* A poll already in flight: a slow answer must not stack another request
+   * on top of it, so a tick that finds one outstanding simply skips. */
+  var runPollInFlight = false;
+  var runPollFails = 0;
+  /* The status the card last drew, serialized: a poll whose status part is
+   * unchanged (new lines only) must not redraw the state label and summary
+   * chips, so a change of it is what calls setRunState. */
+  var runPollLastStatus = null;
+  /* Where the polling resumes from: the index of the last line the console
+   * holds. Kept in step with what the console is actually showing —
+   * resetConsole() clears it, so a console starting empty is refilled from
+   * the top. */
+  var runPollLastId = null;
 
-  /* The Produce stage opens on what has already been produced, not on the
-   * console: making another Model Setup Data file is a choice taken after
-   * seeing what exists, not the only thing this stage offers. A run already
-   * in flight outranks that — it is the thing that was happening. */
+  /* The stepper's Produce step. A run this session tracks — going, finished,
+   * or not yet attached after a reload — is what that step names, so it goes
+   * to the console; with nothing tracked, the step points at the card that
+   * starts a run, the inventory, rather than at a console with nothing in it. */
   function enterProduce() {
-    // Only a run still going outranks the list — once it has ended, its file
-    // is in the list like any other, and the list is what this stage is for.
-    var live = !!state.activeTask && !RUN_TERMINAL[runState];
-    return live ? enterRunConsole() : enterFiles();
+    return state.activeTask ? enterRunConsole() : enterInventory();
   }
 
   function enterFiles() {
-    /* Reachable while a run is going, by stepping back off the console. This
-     * session tracks one run at a time, so starting a second here would
-     * orphan the first — the card says so rather than silently doing it.
-     *
-     * A reload can land here holding a tracked run this page has never
-     * attached to, and how that run ended is only on its stream: until it is
-     * opened the run is neither known to be going nor known to be over. So
-     * the card says which of the two it is telling the user, and the way to
-     * settle it is the button beside Produce. */
-    var tracked = !!state.activeTask;
-    var live = tracked && runState !== null && !RUN_TERMINAL[runState];
-    var unattached = tracked && runState === null;
-    el.filesProduce.disabled = live || unattached;
-    // The way back into the run this session is tracking, going or finished.
-    // A finished one is not on offer anywhere else: its file is in the list
-    // like any other, but the log of how it was produced is only here.
-    el.filesLog.hidden = !tracked;
+    /* Reachable while a run is going, by stepping back off the console. If
+     * one is, the card says so, so Produce new reads as a second run rather
+     * than the only way. */
+    var live =
+      !!state.activeTask && runState !== null && !RUN_TERMINAL[runState];
     setMessage(
       "files",
       null,
-      live
-        ? "A production run is already in progress."
-        : unattached
-        ? "This session is tracking a production run. Open its log to see where it got to."
-        : ""
+      live ? "A production run is already in progress." : ""
     );
     showView("files");
     loadFiles();
@@ -1510,11 +1485,11 @@
       showView("run");
       return;
     }
-    // Re-attaching: the stream replays this run's lines from the store, so
-    // the console fills itself in.
+    // Re-attaching: polling from an empty cursor replays this run's lines
+    // from the store, so the console fills itself in.
     setRunState("PENDING", null);
     showView("run");
-    openRunStream(task.task_id);
+    openRunPoll(task.task_id);
   }
 
   /* What has already been produced for this context, before anyone spends a
@@ -1562,6 +1537,41 @@
     });
   }
 
+  // The file a row opens: picking it is choosing the file the model card
+  // will read, and opening that card right away.
+  function openFile(file) {
+    state.modelFile = file;
+    // The model card caches the file it last read; a different pick must not
+    // be served from that cache.
+    state.model = null;
+    rememberUi();
+    enterModel();
+  }
+
+  /* A produced file's timestamp, read as "when" on its row: the ISO string
+   * the server records, drawn as local YYYY-MM-DD HH:MM. Falls back to the
+   * raw string if it does not parse, so a row never blanks out its when. */
+  function generatedAt(stamp) {
+    var d = new Date(stamp);
+    if (isNaN(d.getTime())) {
+      return stamp || "";
+    }
+    function pad(n) {
+      return n < 10 ? "0" + n : "" + n;
+    }
+    return (
+      d.getFullYear() +
+      "-" +
+      pad(d.getMonth() + 1) +
+      "-" +
+      pad(d.getDate()) +
+      " " +
+      pad(d.getHours()) +
+      ":" +
+      pad(d.getMinutes())
+    );
+  }
+
   function fileRow(file) {
     var row = document.createElement("li");
     row.className = "filerow";
@@ -1595,44 +1605,16 @@
       main.appendChild(candidate);
     }
 
+    var go = document.createElement("i");
+    go.className = "lucide lucide-arrow-right filerow__go";
     row.appendChild(main);
-
-    var actions = document.createElement("div");
-    actions.className = "filerow__actions";
-
-    var open = document.createElement("button");
-    open.type = "button";
-    open.className = "submit submit--ghost submit--compact";
-    open.innerHTML = '<span class="submit__label">Open</span>';
-    open.addEventListener("click", function () {
+    row.appendChild(go);
+    // The arrow at the row's right is the action it leads to: opening the
+    // model card the file describes.
+    row.addEventListener("click", function () {
       openFile(file);
     });
-    actions.appendChild(open);
-
-    var download = document.createElement("a");
-    download.className = "submit submit--ghost submit--compact";
-    download.href = msdFilesUrl(state.selection, file.run_id, "download");
-    download.setAttribute("download", "");
-    download.innerHTML =
-      '<i class="lucide lucide-download"></i>' +
-      '<span class="submit__label">Download</span>';
-    actions.appendChild(download);
-
-    row.appendChild(actions);
     return row;
-  }
-
-  // A produced file the user picked: it becomes what the Model card shows,
-  // exactly as a run that just finished would (SRS DSM-VAE req 5 — select the
-  // file to be used).
-  function openFile(file) {
-    if (state.modelFile && state.modelFile.run_id === file.run_id) {
-      enterModel();
-      return;
-    }
-    state.modelFile = file;
-    state.model = null;
-    enterModel();
   }
 
   // The same four counts the Model card's scale cells show, in the same
@@ -1648,27 +1630,11 @@
   }
 
   function wireRun() {
-    // Producing another is a decision taken on the files card; the console is
-    // where it is then watched. So this is the one control that crosses from
-    // one card to the other, and it submits rather than offering to submit —
-    // the choice was already made by pressing it.
-    el.filesProduce.addEventListener("click", function () {
-      // Not enterRunConsole(): that re-attaches to whatever run this session
-      // last tracked, and the point here is a new one. The console opens
-      // empty and already reading as queued, so the wait for the submit to
-      // come back does not look like an idle card.
-      closeRunStream();
-      resetConsole();
-      setRunState("PENDING", null);
-      showView("run");
-      startRun();
-    });
-    // Back into the tracked run, replaying its lines from the store — the
-    // same thing a reload does, so stepping away costs nothing.
-    el.filesLog.addEventListener("click", enterRunConsole);
-    el.runBack.addEventListener("click", enterFiles);
+    // The files card's one button: on to the inventory, where the run is
+    // started. The rows themselves open their file's model card.
+    el.filesPrimary.addEventListener("click", enterInventory);
     // Start survives on the console only as a retry after a run that failed
-    // or was cancelled — the first submit comes from the files card.
+    // or was cancelled — the first submit comes from the inventory card.
     el.runStart.addEventListener("click", startRun);
     el.runModel.addEventListener("click", enterModel);
 
@@ -1680,8 +1646,8 @@
       setBusy(el.runCancel, true, "Cancelling", "Cancel");
       request("POST", taskUrl(task.task_id, "cancel"))
         .then(function () {
-          // The revocation lands as a status event on the open stream; the
-          // button stays busy until it does.
+          // The revocation lands as the terminal state in a later poll; the
+          // button stays busy until that poll arrives.
         })
         .catch(function (error) {
           setBusy(el.runCancel, false, "Cancelling", "Cancel");
@@ -1690,6 +1656,18 @@
           }
         });
     });
+  }
+
+  /* The inventory card's run starter: open the console
+   * already reading as queued and submit. Not enterRunConsole(): that
+   * re-attaches to whatever run this session last tracked, and the point
+   * here is a new one. */
+  function startNewRun() {
+    closeRunPoll();
+    resetConsole();
+    setRunState("PENDING", null);
+    showView("run");
+    startRun();
   }
 
   function startRun() {
@@ -1717,7 +1695,7 @@
         };
         setBusy(el.runStart, false, "Submitting", "Start production");
         setRunState("PENDING", null);
-        openRunStream(payload.task_id);
+        openRunPoll(payload.task_id);
       })
       .catch(function (error) {
         setBusy(el.runStart, false, "Submitting", "Start production");
@@ -1728,137 +1706,118 @@
       });
   }
 
-  function openRunStream(taskId) {
-    // A user-initiated open must not race a pending re-dial, and a new run
-    // starts with a clean re-dial slate.
-    if (runStreamRetryTimer) {
-      window.clearTimeout(runStreamRetryTimer);
-      runStreamRetryTimer = null;
-    }
-    if (taskId !== runStreamTaskId) {
-      runStreamFails = 0;
-      runStreamGivenUp = false;
-    }
-    closeRunStream();
-    if (!window.EventSource) {
-      setMessage(
-        "run",
-        "error",
-        "This browser cannot follow the run. Reload to see the result."
-      );
+  /* Start (or resume) following this run: poll its state — the status plus
+   * the lines the console does not hold yet — every RUN_POLL_MS until the
+   * state goes terminal. Every open here is a fresh attach (a new task, or a
+   * re-attach whose console was just reset), so the failure count and the
+   * status snapshot start clean; the line cursor survives in
+   * runPollLastId only because it is owned by the console, which the caller
+   * has already put in the state this attach wants. */
+  function openRunPoll(taskId) {
+    closeRunPoll();
+    runPollFails = 0;
+    runPollLastStatus = null;
+    runPollTaskId = taskId;
+    pollRun();
+  }
+
+  // One poll: the first after an open, or the next after the previous
+  // settled. The next tick is armed only once this one has answered, so a
+  // slow response can never stack a request on top of itself, and the
+  // pacing is a full RUN_POLL_MS after the answer, however long the request
+  // took. The task id and the cursor the request was made with are captured
+  // and re-checked on the answer: an attach that closed or reset the
+  // console while the request was in flight owns a different console state
+  // now, and its answer — and its failure count — belong to no one.
+  function pollRun() {
+    if (!runPollTaskId || runPollInFlight) {
       return;
     }
-    runStreamTaskId = taskId;
-    /* A stream this code opens is a new one, and would replay the whole run
-     * into a console that already holds it — so where to resume from is said
-     * in the URL, and the id of the last line seen survives the reopen. */
-    var url = taskUrl(taskId, "output");
-    if (runStreamLastId !== null) {
-      url += "?last_event_id=" + encodeURIComponent(runStreamLastId);
+    runPollInFlight = true;
+    var taskId = runPollTaskId;
+    var after = runPollLastId;
+    var url = taskUrl(taskId);
+    // Where the console resumes from: the index of its last line. Absent is
+    // "hold nothing" — the full replay that refills a reset console.
+    if (after !== null) {
+      url += "?after=" + encodeURIComponent(after);
     }
-    runSource = new EventSource(url);
-    // Arm the watchdog against this opening, not the last one. Not
-    // markRunStream(): an event, not a dial, is what proves the stream alive —
-    // resetting the re-dial slate here would defeat the give-up count while
-    // the API is down.
-    runStreamAt = Date.now();
-    runSource.onmessage = function (event) {
-      markRunStream(event);
-      appendConsole(event.data);
-    };
-    // Nothing to draw: a ping only says the stream is still there, which is
-    // the whole point of it.
-    runSource.addEventListener("ping", markRunStream);
-    runSource.addEventListener("status", handleRunStatus);
-    /* Closing the source on the re-dial also suppresses EventSource's own
-     * retry: the app is the only thing re-dialing, and it counts its
-     * failures. */
-    runSource.onerror = function () {
-      if (RUN_TERMINAL[runState]) {
-        closeRunStream();
-        return;
-      }
-      runStreamFails += 1;
-      if (runStreamFails >= STREAM_REDIAL_MAX_FAILS) {
-        runStreamGivenUp = true;
-        runStreamRetrying = false;
-        closeRunStream();
-        setMessage(
-          "run",
-          "error",
-          "Lost the connection to the run. Reload the page to continue."
-        );
-        return;
-      }
-      runStreamRetrying = true;
-      setMessage("run", "info", "Reconnecting to the run…");
-      runStreamRetryTimer = window.setTimeout(function () {
-        runStreamRetryTimer = null;
-        openRunStream(runStreamTaskId);
-      }, STREAM_REDIAL_MS);
-    };
-    /* The watchdog catches the drops the browser never notices (no FIN):
-     * silence for STREAM_STALE_MS is a dead stream whatever the socket
-     * believes. It shares the re-dial path, and stands down once re-dialing
-     * has been given up. */
-    runStreamWatch = window.setInterval(function () {
-      if (
-        runStreamGivenUp ||
-        !runStreamTaskId ||
-        Date.now() - runStreamAt < STREAM_STALE_MS
-      ) {
-        return;
-      }
-      openRunStream(runStreamTaskId);
-    }, STREAM_WATCH_MS);
+    request("GET", url)
+      .then(function (payload) {
+        if (taskId !== runPollTaskId || after !== runPollLastId) {
+          return;
+        }
+        runPollFails = 0;
+        var lines = payload.lines || [];
+        runPollLastId = (runPollLastId === null ? -1 : runPollLastId) + lines.length;
+        appendConsoleBatch(lines);
+        // The status part of the answer, serialized: the card is redrawn only
+        // when it changed, so a poll that brought lines alone does not
+        // re-lay the state label and summary chips.
+        var status = JSON.stringify({
+          state: payload.state,
+          result: payload.result,
+          error: payload.error,
+          progress: payload.progress
+        });
+        if (status !== runPollLastStatus) {
+          runPollLastStatus = status;
+          setRunState(payload.state, payload);
+        }
+        if (RUN_TERMINAL[payload.state]) {
+          // A terminal state is the terminator: this was the last poll.
+          closeRunPoll();
+          return;
+        }
+        schedulePoll();
+      })
+      .catch(function (error) {
+        // A 401 is a 401 whatever the attach: the session is gone either way.
+        if (handleExpired(error)) {
+          return;
+        }
+        if (taskId !== runPollTaskId || after !== runPollLastId) {
+          return;
+        }
+        runPollFails += 1;
+        if (runPollFails >= POLL_MAX_CONSECUTIVE_FAILURES) {
+          closeRunPoll();
+          setMessage(
+            "run",
+            "error",
+            "Lost the connection to the run. Reload the page to continue."
+          );
+          return;
+        }
+        schedulePoll();
+      })
+      .then(function () {
+        runPollInFlight = false;
+        // If the attach moved while this poll was in flight, this settles
+        // into the new attach's first tick.
+        schedulePoll();
+      });
   }
 
-  // Any event at all is proof the stream is alive: it arms the watchdog,
-  // resets the re-dial slate, and takes down a reconnection notice the
-  // operator no longer needs to see.
-  function markRunStream(event) {
-    runStreamAt = Date.now();
-    if (event && event.lastEventId) {
-      runStreamLastId = event.lastEventId;
-    }
-    runStreamFails = 0;
-    runStreamGivenUp = false;
-    if (runStreamRetrying) {
-      runStreamRetrying = false;
-      setMessage("run", null, "");
-    }
-  }
-
-  function closeRunStream() {
-    if (runStreamRetryTimer) {
-      window.clearTimeout(runStreamRetryTimer);
-      runStreamRetryTimer = null;
-    }
-    if (runStreamWatch) {
-      window.clearInterval(runStreamWatch);
-      runStreamWatch = null;
-    }
-    if (runSource) {
-      runSource.close();
-      runSource = null;
-    }
-  }
-
-  function handleRunStatus(event) {
-    markRunStream(event);
-    var status;
-    try {
-      status = JSON.parse(event.data);
-    } catch (error) {
+  function schedulePoll() {
+    if (!runPollTaskId || runPollTimer !== null) {
       return;
     }
-    setRunState(status.state, status);
-    /* A terminal status is the terminator: closing here is what ends the
-     * stream. The server's grace close afterwards is only a leak guard for a
-     * client that vanished. */
-    if (RUN_TERMINAL[status.state]) {
-      closeRunStream();
+    runPollTimer = window.setTimeout(function () {
+      runPollTimer = null;
+      pollRun();
+    }, RUN_POLL_MS);
+  }
+
+  // runPollInFlight is deliberately not cleared here: the in-flight request
+  // still owns the flag until its answer settles, which is what keeps a
+  // re-open from stacking a second request on top of it.
+  function closeRunPoll() {
+    if (runPollTimer !== null) {
+      window.clearTimeout(runPollTimer);
+      runPollTimer = null;
     }
+    runPollTaskId = null;
   }
 
   // status is the payload for a finished run, or null when there is nothing
@@ -1870,16 +1829,6 @@
 
     el.runStatus.setAttribute("data-tone", known ? known.tone : "idle");
     el.runStatusValue.textContent = known ? known.label : "Not started";
-
-    // The panel flashes once on the way into a terminal state. Dropping the
-    // class and reading layout back restarts the animation, so a second run
-    // ending the same way flashes again rather than sitting on a class it
-    // already carries.
-    el.runStatus.classList.remove("runpanel--flash");
-    if (RUN_TERMINAL[taskState]) {
-      void el.runStatus.offsetWidth;
-      el.runStatus.classList.add("runpanel--flash");
-    }
 
     /* A run that wrote a file makes that file the one the model stage shows,
      * the same way picking one from the list above does — a reload re-earns
@@ -1927,6 +1876,7 @@
     }
 
     renderRunSummary(status);
+    renderRunProgress(taskState, status);
 
     if (status && status.error) {
       setMessage("run", "error", status.error);
@@ -1963,6 +1913,39 @@
     el.runSummary.hidden = false;
   }
 
+  /* The run's overall progress, published by the worker inside the status
+   * the polls carry: it moves while the state label does not. Appended to the
+   * state label from the first published percent (setRunState lays the bare
+   * label down and then calls this, so the append always lands on it), and
+   * kept at its last value once the run ends — so a run that failed or was
+   * cancelled says where it stopped. A run that succeeded is complete by
+   * definition, so it is shown at 100% even if its last progress update did
+   * not reach the polls before the terminal one. */
+  function renderRunProgress(taskState, status) {
+    if (taskState === "SUCCESS") {
+      showRunProgress(100);
+      return;
+    }
+    if (RUN_TERMINAL[taskState]) {
+      return;
+    }
+    var progress = status && status.progress;
+    var percent = progress && progress.percent;
+    if (percent === undefined || percent === null) {
+      return;
+    }
+    showRunProgress(percent);
+  }
+
+  function showRunProgress(percent) {
+    percent = Math.max(0, Math.min(100, Math.round(percent)));
+    el.runProgress.hidden = false;
+    el.runProgress.setAttribute("aria-valuenow", String(percent));
+    el.runProgress.style.width = percent + "%";
+    el.runStatusValue.textContent =
+      el.runStatusValue.textContent + " · " + percent + "%";
+  }
+
   // The worker formats every line as "%(asctime)s %(levelname)-8s
   // %(message)s" with an %H:%M:%S clock (worker.py), so the three parts can
   // be told apart and styled. Anything that does not match — a traceback's
@@ -1972,10 +1955,26 @@
   var LOG_LINE =
     /^(\d{2}:\d{2}:\d{2})\s+(DEBUG|INFO|WARNING|ERROR|CRITICAL)(\s+)([\s\S]*)$/;
 
+  /* How many rows the console's DOM keeps. A long run logs per unit, and a
+   * re-attach replay brings its whole log at once, so without a bound the
+   * one scroll box would grow for the run's lifetime. The newest
+   * CONSOLE_MAX_ROWS stay; what drops out is only counted, in the marker at
+   * the console's top — trimmed lines are named, not deleted silently. The
+   * marker is not a row. */
+  var CONSOLE_MAX_ROWS = 1000;
+  var consoleTrimmed = 0;
+
   function resetConsole() {
     // The console and the resume point are one thing: emptying it means the
-    // next stream has to start from the run's first line again.
-    runStreamLastId = null;
+    // next poll has to start from the run's first line again. The progress
+    // strip goes with it — a re-attach earns its value back from the poll's
+    // status, and a fresh run starts with none. The trimmed count goes with
+    // the rows it counts.
+    consoleTrimmed = 0;
+    runPollLastId = null;
+    el.runProgress.hidden = true;
+    el.runProgress.removeAttribute("aria-valuenow");
+    el.runProgress.style.width = "0%";
     el.console.textContent = "";
     var idle = document.createElement("p");
     idle.className = "console__idle";
@@ -1988,7 +1987,15 @@
     el.console.hidden = false;
   }
 
-  function appendConsole(line) {
+  /* One poll can bring many lines — a re-attach replay brings the whole
+   * stored log at once — so they are appended together: the at-bottom check
+   * once before the change, one fragment insert, one scroll set after. Two
+   * layout passes per batch rather than two per line, and a replay burst is
+   * linear in the number of lines instead of quadratic. */
+  function appendConsoleBatch(lines) {
+    if (!lines.length) {
+      return;
+    }
     // The first line replaces the standing-by note, and the console stops
     // centring what it holds.
     if (el.console.classList.contains("console--empty")) {
@@ -1999,6 +2006,22 @@
     var atBottom =
       el.console.scrollTop + el.console.clientHeight >=
       el.console.scrollHeight - 4;
+
+    var fragment = document.createDocumentFragment();
+    lines.forEach(function (line) {
+      fragment.appendChild(consoleLine(line));
+    });
+    el.console.appendChild(fragment);
+    enforceConsoleCap();
+
+    // Follow the tail only while the operator is already at it — scrolling
+    // back to read something must not be yanked away by the next lines.
+    if (atBottom) {
+      el.console.scrollTop = el.console.scrollHeight;
+    }
+  }
+
+  function consoleLine(line) {
     var row = document.createElement("div");
     row.className = "console__line";
 
@@ -2013,13 +2036,29 @@
     } else {
       row.textContent = line;
     }
+    return row;
+  }
 
-    el.console.appendChild(row);
-    // Follow the tail only while the operator is already at it — scrolling
-    // back to read something must not be yanked away by the next line.
-    if (atBottom) {
-      el.console.scrollTop = el.console.scrollHeight;
+  /* What the cap drops out of the console's top is counted, not deleted
+   * silently: one marker, as the console's first child, naming how many
+   * earlier lines have been trimmed so far. */
+  function enforceConsoleCap() {
+    var rows = el.console.querySelectorAll(".console__line");
+    if (rows.length <= CONSOLE_MAX_ROWS) {
+      return;
     }
+    var overflow = rows.length - CONSOLE_MAX_ROWS;
+    for (var i = 0; i < overflow; i += 1) {
+      el.console.removeChild(rows[i]);
+      consoleTrimmed += 1;
+    }
+    var marker = el.console.querySelector(".console__trimmed");
+    if (!marker) {
+      marker = document.createElement("p");
+      marker.className = "console__trimmed";
+      el.console.insertBefore(marker, el.console.firstChild);
+    }
+    marker.textContent = "… " + consoleTrimmed + " earlier lines trimmed";
   }
 
   // textContent throughout: these lines are the worker's own output, so
@@ -2050,7 +2089,7 @@
     setMessage("model", null, "");
     if (!state.modelFile) {
       // No file picked and none produced; the files card is where one is
-      // chosen or a run is started to make one.
+      // chosen, and the inventory's the card that runs one into being.
       enterFiles();
       return;
     }
@@ -2409,6 +2448,8 @@
         }
         if (key === "sources") {
           enterSources();
+        } else if (key === "files") {
+          enterFiles();
         } else if (key === "inventory") {
           enterInventory();
         } else if (key === "run") {
@@ -2416,6 +2457,7 @@
         } else if (key === "model") {
           enterModel();
         } else if (
+          state.view === "files" ||
           state.view === "inventory" ||
           state.view === "run" ||
           state.view === "model"
@@ -2524,10 +2566,10 @@
           }
           if (!tracks(state.activeTask, state.selection)) {
             state.activeTask = null;
-            closeRunStream();
+            closeRunPoll();
           }
           setBusy(el.selectSubmit, false, "Saving", "Continue");
-          enterInventory();
+          enterFiles();
         })
         .catch(function (error) {
           setBusy(el.selectSubmit, false, "Saving", "Continue");
@@ -2544,8 +2586,16 @@
     el.candidateVersion.addEventListener("change", onCandidateVersionChange);
 
     // Going back to the context is the stepper's job; this card only leads
-    // forward.
-    el.inventoryNext.addEventListener("click", enterProduce);
+    // forward. A run this session already tracks is the thing that was
+    // happening, so it is re-attached to; otherwise the button submits a
+    // new one.
+    el.inventoryNext.addEventListener("click", function () {
+      if (state.activeTask) {
+        enterRunConsole();
+      } else {
+        startNewRun();
+      }
+    });
   }
 
   function collect() {
@@ -2605,16 +2655,15 @@
     el.runStatus = $("run-status");
     el.runStatusValue = $("run-status-value");
     el.runSummary = $("run-summary");
+    el.runProgress = $("run-progress");
     el.console = $("console");
     el.runStart = $("run-start");
     el.runCancel = $("run-cancel");
     el.runModel = $("run-model");
-    el.runBack = $("run-back");
     el.runFilesPanel = $("run-files-panel");
     el.runFiles = $("run-files");
     el.runFilesEmpty = $("run-files-empty");
-    el.filesProduce = $("files-produce");
-    el.filesLog = $("files-log");
+    el.filesPrimary = $("files-primary");
 
     el.modelContext = $("model-context");
     el.modelProject = $("model-project");

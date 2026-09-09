@@ -16,7 +16,7 @@ default is the CPU count, as per Celery)
 import argparse
 import logging
 
-from celery import Celery
+from celery import Celery, states
 
 from msd.adapters.mysql_config_management_repository import MysqlConfigManagementRepository
 from msd.adapters.source_code.git_source_code_repository import GitSourceCodeRepository
@@ -65,6 +65,24 @@ def _make_task_output_store() -> ITaskOutputStore:
     # The result-backend db holds per-task state, so captured output lives
     # there too (TTL matches result_expires, via the adapter's default).
     return RedisTaskOutputStore(get_config().worker.result_backend)
+
+
+class TaskProgress:
+    """The progress callback the run_msd_workflow task hands msd's workflow:
+    each (percent, phase) step is stored as the task's own state meta, so the
+    API's run stream — which re-reads the task's status — picks it up without
+    any channel of its own. A store failure is logged, never raised: the run's
+    outcome must not depend on the progress channel (same policy as the task's
+    output handler)."""
+
+    def __init__(self, task):
+        self._task = task
+
+    def report(self, percent: int, phase: str) -> None:
+        try:
+            self._task.update_state(state=states.STARTED, meta={"percent": percent, "phase": phase})
+        except Exception:
+            logger.warning("task progress: failed to record progress for task %s", self._task.request.id)
 
 
 def make_celery() -> Celery:
@@ -126,7 +144,9 @@ def run_msd_workflow(
 
     Log output (INFO+) is captured for the run's duration into the task's
     output store, so the API can stream it to the UI (see
-    GET /api/msd/tasks/<task_id>/output)."""
+    GET /api/msd/tasks/<task_id>/output). Progress is stored the same way a
+    Celery task stores any mid-run state — update_state's meta — so the same
+    stream's status events carry it (TaskProgress)."""
     output_handler = TaskOutputHandler(_make_task_output_store(), self.request.id)
     logging.getLogger().addHandler(output_handler)
     try:
@@ -161,6 +181,7 @@ def run_msd_workflow(
             run_id=self.request.id,
             produced_by=produced_by,
             candidate=CandidateUnitVersion.from_dict(candidate),
+            progress=TaskProgress(self).report,
         ).to_dict()
     finally:
         logging.getLogger().removeHandler(output_handler)

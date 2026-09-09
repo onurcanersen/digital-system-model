@@ -63,7 +63,15 @@ class CeleryTaskRunner(ITaskRunner):
             if not isinstance(result, dict):
                 result = {"value": result} if result is not None else None
             return TaskStatus(task_id=task_id, state=state, result=result)
-        return TaskStatus(task_id=task_id, state=state)
+        # A non-terminal task can carry the mid-run state it published itself
+        # (update_state's meta — vae's runs use it for the run's progress):
+        # the redis backend stores that meta in the same result field the
+        # SUCCESS branch reads. Celery's own "started" info (pid/hostname) is
+        # not progress, so only a progress-shaped meta is surfaced.
+        info = async_result.result
+        if not isinstance(info, dict) or "percent" not in info:
+            info = None
+        return TaskStatus(task_id=task_id, state=state, info=info)
 
     def cancel(self, task_id: str) -> TaskStatus:
         # terminate=True kills the worker child process if the task is already

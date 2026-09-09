@@ -16,3 +16,7 @@ class TaskStatus:
     state: str  # PENDING | STARTED | SUCCESS | FAILURE | ...
     result: Optional[Dict] = None
     error: Optional[str] = None
+    # Mid-run state the task itself published (Celery's update_state meta):
+    # for vae's runs the overall progress of the run so far. None while the
+    # task has published nothing and once a terminal state has replaced it.
+    info: Optional[Dict] = None

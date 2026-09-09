@@ -1,6 +1,6 @@
 """In-process ITaskOutputStore for vae's tests: keeps a task's output lines
 in a dict, so no redis is needed to exercise the worker's capture or the
-API's run stream."""
+API's task-state endpoint."""
 
 from __future__ import annotations
 
@@ -18,3 +18,6 @@ class FakeTaskOutputStore(ITaskOutputStore):
 
     def lines(self, task_id: str) -> List[str]:
         return list(self._lines.get(task_id, ()))
+
+    def lines_since(self, task_id: str, index: int) -> List[str]:
+        return list(self._lines.get(task_id, ())[max(index, 0):])

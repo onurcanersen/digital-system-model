@@ -114,11 +114,11 @@ body {
   list-style: none;
 }
 
-/* Five stages across the shell's 392px, so the basis is what fits
+/* Six stages across the shell's 392px, so the basis is what fits
    rather than a round number. */
 .stepper__item {
   position: relative;
-  flex: 0 0 74px;
+  flex: 0 0 64px;
 }
 
 /* A stage that has been reached is a way back to it; one that has not
@@ -246,7 +246,7 @@ body {
 
 @media (max-width: 420px) {
   .stepper__item {
-    flex-basis: 62px;
+    flex-basis: 56px;
   }
 }
 
@@ -271,7 +271,6 @@ body {
 .card {
   width: var(--w-form);
   padding: var(--card-pad);
-  transition: width 0.3s ease;
 }
 
 /* Narrower than any stage card, and the two of them the same: sign-in
@@ -459,6 +458,7 @@ body {
   font-family: Orbitron, Barlow, sans-serif;
   font-size: var(--fs-sub);
   font-weight: 600;
+  line-height: 1.3;
   letter-spacing: var(--ls-sub);
   text-align: center;
   text-transform: uppercase;
@@ -651,29 +651,8 @@ body {
   display: none;
 }
 
-/* Two actions the operator chooses between rather than one after the
-   other — the way back and the way on — so they share a line instead of
-   stacking into two bars of equal weight. Widths are shares of the row,
-   not of the labels: --compact's flex:none is undone here. */
-.actions__row {
-  display: flex;
-  gap: 9px;
-}
-
-.actions__row > .submit {
-  flex: 1 1 0;
-  width: auto;
-}
-
-/* The action the card leads to takes twice the row, so the pair reads as
-   one forward bar with a way back beside it rather than as a choice
-   between equals. Alone in the row, the other one still fills it. */
-.actions__row > .submit--grow {
-  flex-grow: 2;
-}
-
-/* Submit: a bordered command bar. Hover sweeps a solid cyan fill in
-   from the left and flips the label to dark ink. */
+/* Submit: a bordered command bar. Hover fills it solid cyan and flips the
+   label to dark ink, applied instantly. */
 .submit {
   position: relative;
   display: flex;
@@ -681,7 +660,6 @@ body {
   justify-content: center;
   width: 100%;
   padding: 12px 16px;
-  overflow: hidden;
   border: 1px solid var(--cyan);
   border-radius: var(--r-control);
   background-color: rgba(34, 230, 245, 0.07);
@@ -693,7 +671,6 @@ body {
   text-transform: uppercase;
   text-decoration: none;
   cursor: pointer;
-  transition: color 0.28s ease, box-shadow 0.28s ease;
 }
 
 /* display:flex above would otherwise beat the hidden attribute the run
@@ -702,44 +679,18 @@ body {
   display: none;
 }
 
-.submit::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-color: var(--cyan);
-  transform: scaleX(0);
-  transform-origin: left center;
-  transition: transform 0.32s ease;
-}
-
-/* Lift the label above the sweeping fill. */
-.submit > * {
-  position: relative;
-  z-index: 1;
-}
-
 .submit__arrow {
   margin-left: 10px;
   font-size: 18px;
   line-height: 1;
-  transition: transform 0.28s ease;
 }
 
 .submit:hover:not(:disabled),
 .submit:focus-visible:not(:disabled) {
+  background-color: var(--cyan);
   color: #04222c;
   outline: none;
   box-shadow: 0 0 26px rgba(34, 230, 245, 0.45);
-}
-
-.submit:hover:not(:disabled)::before,
-.submit:focus-visible:not(:disabled)::before {
-  transform: scaleX(1);
-}
-
-.submit:hover:not(:disabled) .submit__arrow,
-.submit:focus-visible:not(:disabled) .submit__arrow {
-  transform: translateX(4px);
 }
 
 .submit:active:not(:disabled) {
@@ -765,10 +716,6 @@ body {
   letter-spacing: 0.16em;
 }
 
-.submit--ghost::before {
-  display: none;
-}
-
 /* Sized to its own label rather than the row: in the run card's single
    action row, the width belongs to the action the operator came for.
    After --ghost, so a bar carrying both ends up compact. */
@@ -783,6 +730,7 @@ body {
 
 .submit--ghost:hover:not(:disabled),
 .submit--ghost:focus-visible:not(:disabled) {
+  background-color: transparent;
   border-color: var(--cyan-dim);
   color: var(--cyan);
   box-shadow: none;
@@ -798,12 +746,9 @@ body {
   color: var(--ok);
 }
 
-.submit--ok::before {
-  background-color: var(--ok);
-}
-
 .submit--ok:hover:not(:disabled),
 .submit--ok:focus-visible:not(:disabled) {
+  background-color: var(--ok);
   color: #04220f;
   box-shadow: 0 0 26px rgba(53, 224, 127, 0.45);
 }
@@ -1155,6 +1100,20 @@ body {
   overflow: hidden;
 }
 
+/* The inventory and the previously produced list swap in the same slot
+   of the card, so the two panels take one shared height rather than
+   whatever their content happens to hold: bar, list cap (190px, or 22vh
+   on a short screen), and the inventory's candidate row — which the
+   files panel answers with that much extra list. Fixed on the panel,
+   not the list, so the two can never drift by the candidate row's
+   pixels. */
+.units,
+.files {
+  display: flex;
+  flex-direction: column;
+  height: min(268px, calc(22vh + 78px));
+}
+
 /* Only the inventory takes focus, through the filter it contains. */
 .units {
   transition: border-color 0.2s, box-shadow 0.2s;
@@ -1329,16 +1288,15 @@ body {
   letter-spacing: 0.09em;
 }
 
-/* The floor that keeps a filtered list from shrinking the box is set
-   in script, from the height the full list settles at.
-
-   The cap is viewport-relative as well as absolute: this is the one
-   card whose content has no bound — a system version can define any
-   number of units — and the list is the only part of it that can give
-   way, so on a short screen it yields rather than pushing the Produce
-   button past the fold. */
+/* The panel's height is fixed above, so the list takes whatever the bar
+   and the candidate row leave — 190px on a roomy screen, 22vh on a short
+   one. It is the one card whose content has no bound (a system version
+   can define any number of units), and the list is the only part of it
+   that can give way, so on a short screen it yields rather than pushing
+   the Produce button past the fold. */
 .units__list {
-  max-height: min(190px, 22vh);
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -1421,22 +1379,42 @@ body {
    version, not by user: each row names its producer instead. Panel,
    bar and rows all come from the list primitives above. */
 .files__list {
-  max-height: 168px;
+  flex: 1 1 auto;
+  min-height: 0;
+  /* Last in the DOM, but rendered after the empty note: the note belongs
+     under the bar, where the inventory's own empty line sits, and the
+     list fills what the bar and the note leave. */
+  order: 1;
   margin: 0;
   padding: 0;
   overflow-y: auto;
   list-style: none;
 }
 
-/* The actions sit beside a block of wrapped text rather than beside a
-   single line, so this row centres on them where the others share a
-   baseline. */
+/* The action marker sits beside a block of wrapped text rather than beside
+   a single line, so this row centres on it where the others share a
+   baseline. A row that leads somewhere, made to read as one: it warms when
+   you are about to follow it. */
 .filerow {
   align-items: center;
+  cursor: pointer;
+}
+
+.filerow:hover {
+  background: rgba(34, 230, 245, 0.05);
+}
+
+/* The action the row leads to — the arrow at its right end, always shown,
+   so every row reads as something you can open. */
+.filerow__go {
+  flex: none;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--cyan);
 }
 
 /* The identity of the file — when, by whom, how big — as one column, so
-   the two actions sit at a single predictable end of every row. */
+   the action marker sits at a single predictable end of every row. */
 .filerow__main {
   display: flex;
   flex: 1;
@@ -1450,19 +1428,6 @@ body {
   flex-basis: 100%;
 }
 
-.filerow__actions {
-  display: flex;
-  flex: none;
-  gap: 6px;
-}
-
-.filerow__actions .submit {
-  gap: 6px;
-  padding: 3px 9px;
-  font-size: 10px;
-  line-height: 1;
-}
-
 .files__empty {
   padding: 12px;
 }
@@ -1473,7 +1438,6 @@ body {
 .runpanel {
   position: relative;
   background-color: rgba(2, 14, 20, 0.72);
-  transition: border-color 0.3s ease;
 }
 
 .runpanel__bar {
@@ -1546,7 +1510,6 @@ body {
   font-size: 18px;
   line-height: 1;
   color: var(--muted);
-  transition: color 0.3s ease, filter 0.3s ease;
 }
 
 /* Orbitron is otherwise the card's own headline face; the run's state
@@ -1559,12 +1522,31 @@ body {
   letter-spacing: var(--ls-label);
   text-transform: uppercase;
   color: var(--muted);
-  transition: color 0.3s ease;
 }
 
-/* Running: the rocket climbs, the label breathes, and a cyan sweep
-   crosses the bar — saying "working" without a progress bar the card
-   has no percentage to fill. */
+/* The run's overall progress, riding the status bar itself: a fill whose
+   width is set inline from the percent the worker publishes
+   (TaskProgress), behind the bar's own content. First child of the bar,
+   so it must be the one absolute thing there — the rest of the bar's
+   children are positioned over it in DOM order. Hidden until the run has
+   published a first percent, and kept at its last value once the run
+   ends, so a failed run says where it stopped. */
+.runpanel__bar .runpanel__bar-progress {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  background: linear-gradient(90deg, rgba(34, 230, 245, 0.08), rgba(34, 230, 245, 0.22));
+  pointer-events: none;
+}
+
+.runpanel__bar > * {
+  position: relative;
+}
+
+/* Running: the panel's chrome goes cyan — the rocket, the label, and the
+   bar's border — applied instantly. */
 .runpanel[data-tone="busy"] {
   border-color: var(--cyan-dim);
 }
@@ -1572,26 +1554,10 @@ body {
 .runpanel[data-tone="busy"] .runpanel__rocket {
   color: var(--cyan);
   filter: drop-shadow(0 0 8px rgba(34, 230, 245, 0.9));
-  animation: rocket-lift 2s ease-in-out infinite;
 }
 
 .runpanel[data-tone="busy"] .runpanel__value {
   color: var(--cyan);
-  animation: status-glow 1.8s ease-in-out infinite;
-}
-
-.runpanel[data-tone="busy"] .runpanel__bar::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(34, 230, 245, 0.14),
-    transparent
-  );
-  animation: bar-sweep 2.4s linear infinite;
-  pointer-events: none;
 }
 
 .runpanel[data-tone="ok"] {
@@ -1620,68 +1586,6 @@ body {
 .runpanel[data-tone="bad"] .runpanel__value {
   color: var(--danger);
   text-shadow: 0 0 14px rgba(255, 107, 122, 0.5);
-}
-
-/* One-shot on the way into a terminal state, so the outcome registers
-   even when the operator was reading the log rather than the bar. */
-.runpanel--flash[data-tone="ok"] {
-  animation: flash-ok 0.6s ease-out;
-}
-
-.runpanel--flash[data-tone="bad"] {
-  animation: flash-bad 0.6s ease-out;
-}
-
-.runpanel--flash[data-tone="bad"] .runpanel__rocket {
-  animation: shake 0.4s ease-in-out;
-}
-
-@keyframes rocket-lift {
-  50% {
-    transform: translateY(-3px) rotate(-6deg);
-  }
-}
-
-@keyframes status-glow {
-  50% {
-    text-shadow: 0 0 16px rgba(34, 230, 245, 0.75);
-  }
-}
-
-@keyframes bar-sweep {
-  from {
-    transform: translateX(-100%);
-  }
-  to {
-    transform: translateX(100%);
-  }
-}
-
-@keyframes flash-ok {
-  from {
-    box-shadow: 0 0 0 0 rgba(53, 224, 127, 0.55);
-  }
-  to {
-    box-shadow: 0 0 0 14px rgba(53, 224, 127, 0);
-  }
-}
-
-@keyframes flash-bad {
-  from {
-    box-shadow: 0 0 0 0 rgba(255, 107, 122, 0.55);
-  }
-  to {
-    box-shadow: 0 0 0 14px rgba(255, 107, 122, 0);
-  }
-}
-
-@keyframes shake {
-  25% {
-    transform: translateX(-3px);
-  }
-  75% {
-    transform: translateX(3px);
-  }
 }
 
 /* Per-unit outcome of a finished run, one chip per status seen. Rides
@@ -1751,7 +1655,7 @@ body {
 }
 
 /* The console is the only thing on this card that gives up height; the
-   bar above it and the strip and controls below it keep theirs. */
+   bar above it and the controls below it keep theirs. */
 .shell--run .runpanel__bar,
 .shell--run #run-message,
 .shell--run .actions {
@@ -1812,6 +1716,17 @@ body {
   background-color: rgba(255, 107, 122, 0.08);
 }
 
+/* What the row cap trims out of the console's top, named rather than
+   deleted: a quiet note at the head of what is left, read as a line count
+   rather than a log line. */
+.console__trimmed {
+  margin: 0 0 4px;
+  text-align: center;
+  font-size: var(--fs-chip);
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
 .units__empty {
   padding: 22px 12px;
 }
@@ -1834,6 +1749,14 @@ body {
 .card[data-view="model"] .card__blur,
 .card[data-view="model"] .card__corners {
   display: none;
+}
+
+/* The deck's panels carry their own frame, so their tint is their whole
+   fill: a deeper draw of the shared tint keeps the rows on a panel
+   legible over the busiest parts of the page background, without
+   touching the stage cards, which sit over calmer ground. */
+.mpanel__blur::after {
+  background-color: rgba(6, 26, 36, 0.7);
 }
 
 /* Two columns of two: what the model is on the left, what was read to

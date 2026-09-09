@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from unittest import mock
 
-from celery import Celery
+from celery import Celery, states
 
 from fakes.fake_task_output_store import FakeTaskOutputStore
 
@@ -42,9 +42,20 @@ class _NullBackend:
         pass
 
 
-def _apply_task(components, tmp_path: Path, extra_args=()):
+class _RecordingBackend(_NullBackend):
+    """A _NullBackend that records store_result calls: what update_state
+    (the run's progress channel) writes to the backend."""
+
+    def __init__(self):
+        self.stored = []
+
+    def store_result(self, *args, **kwargs):
+        self.stored.append((args, kwargs))
+
+
+def _apply_task(components, tmp_path: Path, extra_args=(), backend=None):
     with mock.patch("vae.worker.load_components", return_value=components), \
-         mock.patch.object(Celery, "backend", new=property(lambda self: _NullBackend())), \
+         mock.patch.object(Celery, "backend", new=property(lambda self: backend or _NullBackend())), \
          mock.patch("vae.worker._make_task_output_store", return_value=FakeTaskOutputStore()):
         return worker.run_msd_workflow.apply(
             args=[
@@ -70,7 +81,7 @@ def test_run_msd_workflow_task_passes_the_workspace_and_the_task_id_as_run_id(tm
     # <project>/<platform>/<version>/<run_id> itself.
     components.workflow.return_value.execute.assert_called_once_with(
         tmp_path / "ws", "proj-1", "plat-1", "1.0.0",
-        run_id="task-eager", produced_by=None, candidate=None,
+        run_id="task-eager", produced_by=None, candidate=None, progress=mock.ANY,
     )
 
 
@@ -112,6 +123,53 @@ def test_run_msd_workflow_task_ignores_an_unusable_candidate(tmp_path: Path):
     _apply_task(components, tmp_path, extra_args=["operator", {"unit_name": "sensor_app"}])
 
     assert components.workflow.return_value.execute.call_args.kwargs["candidate"] is None
+
+
+def _components_reporting_progress(tmp_path: Path, percent: int = 42, phase: str = "clone") -> mock.Mock:
+    """A workflow mock that, like the real one, reports progress from inside
+    the running task — the only place the task's request context (and with it
+    the backend the report is stored on) is live."""
+    components = mock.Mock()
+    components.workspace = tmp_path / "ws"
+
+    def _execute(*args, **kwargs):
+        assert kwargs["progress"] is not None
+        kwargs["progress"](percent, phase)
+        return mock.Mock()
+
+    components.workflow.return_value.execute.side_effect = _execute
+    return components
+
+
+def test_run_msd_workflow_task_reports_progress_to_the_result_backend(tmp_path: Path):
+    """The run's progress is published as the task's own state meta (via
+    update_state), so the API's run stream — which re-reads the task's status
+    — picks it up without a channel of its own."""
+    backend = _RecordingBackend()
+
+    result = _apply_task(_components_reporting_progress(tmp_path), tmp_path, backend=backend)
+
+    assert result.successful()
+    matching = [(a, k) for a, k in backend.stored if a and a[1] == {"percent": 42, "phase": "clone"}]
+    assert matching, "the progress report never reached the backend"
+    args, _kwargs = matching[0]
+    assert args[0] == "task-eager"
+    assert args[2] == states.STARTED
+
+
+class _FailingBackend(_NullBackend):
+    def store_result(self, *args, **kwargs):
+        raise RuntimeError("redis down")
+
+
+def test_run_msd_workflow_task_survives_a_dead_progress_channel(tmp_path: Path):
+    """A progress report that cannot be stored must not fail the run — the
+    same policy as the task's output capture."""
+    result = _apply_task(
+        _components_reporting_progress(tmp_path), tmp_path, backend=_FailingBackend()
+    )
+
+    assert result.successful()
 
 
 def _record(message: str, level: int = logging.INFO) -> logging.LogRecord:

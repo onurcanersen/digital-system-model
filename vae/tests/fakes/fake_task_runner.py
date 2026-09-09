@@ -14,9 +14,10 @@ from vae.ports.task_runner import ITaskRunner
 class FakeTaskRunner(ITaskRunner):
     def __init__(self, run: Callable[..., dict], state_sequence=None):
         self._run = run
-        # Optional pre-terminal states (e.g. ["PENDING", "STARTED"]) that
-        # status() returns in order before the recorded terminal outcome, so
-        # stream tests can observe state transitions.
+        # Optional pre-terminal statuses (e.g. ["PENDING", "STARTED"], or
+        # TaskStatus objects carrying mid-run info such as the run's progress)
+        # that status() returns in order before the recorded terminal outcome,
+        # so stream tests can observe state transitions and progress changes.
         self._state_sequence = list(state_sequence) if state_sequence else []
         self._sequence_calls = 0
         self._tasks: dict = {}
@@ -62,7 +63,12 @@ class FakeTaskRunner(ITaskRunner):
             return TaskStatus(task_id=task_id, state="PENDING")
         if self._sequence_calls < len(self._state_sequence):
             self._sequence_calls += 1
-            return TaskStatus(task_id=task_id, state=self._state_sequence[self._sequence_calls - 1])
+            entry = self._state_sequence[self._sequence_calls - 1]
+            # A TaskStatus entry is used as-is (re-pointed at this task id) so
+            # a test can hand the stream a mid-run status with progress info.
+            if isinstance(entry, TaskStatus):
+                return TaskStatus(task_id=task_id, state=entry.state, info=entry.info)
+            return TaskStatus(task_id=task_id, state=entry)
         return known
 
     def cancel(self, task_id: str) -> TaskStatus:

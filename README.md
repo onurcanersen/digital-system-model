@@ -52,6 +52,11 @@ plus `[config_mgmt_db]` for project/platform/version selection).
 
 Then open the UI at <http://127.0.0.1:8080>.
 
+Sessions are persistent (the cookie carries a 24h lifetime, the same window a
+tracked run is kept for): closing the browser — even mid-run — and reopening
+it resumes the same session on the card the user was standing on, with the
+run's output replayed from the store.
+
 ### VAE API endpoints
 
 | Method | Path | Description |
@@ -70,12 +75,12 @@ Then open the UI at <http://127.0.0.1:8080>.
 | POST | `/api/selection` | Persist the selected project/platform/version in the session; body `{"project_id", "platform_id", "version_id"}` |
 | DELETE | `/api/selection` | Clear the persisted selection (the UI clears it on resume when the options no longer exist) |
 | POST | `/api/msd/run` | Enqueue msd's clone + generate workflow; body `{"project_id", "platform_id", "version_id"}` plus an optional `"candidate": {"unit_name", "version"}`, returns `202 {"task_id"}` |
-| GET | `/api/msd/tasks/<task_id>/output` | Server-sent run stream (SSE): output lines, `status` events pushed on state changes (with a snapshot on connect/reconnect); a terminal `status` (state/result/error) ends the run — the client closes on it, and the stream stays open up to 60s afterwards as a leak guard for a client that vanished |
+| GET | `/api/msd/tasks/<task_id>` | One poll of the run: the task's status (state, and result/error/progress when the run has published them) plus the output lines after the `after` cursor — the index of the last line the client holds, absent for the full list. The UI polls it every second or so until the state goes terminal; it is the machine-readable status channel for automation clients too |
 | POST | `/api/msd/tasks/<task_id>/cancel` | Cancel a queued or running task (terminates the worker process if running); returns the task state |
 
-Note: each open run stream holds one API thread for the run's duration, plus
-up to 60s after completion until the client closes the stream (dev server is
-threaded by default; size production workers accordingly).
+The run card follows the run by polling `GET /api/msd/tasks/<task_id>` every
+second or so; a poll is a short request (task status plus the output lines
+after the client's cursor), so nothing stays open for the run's duration.
 
 Produced files are addressed by selection + run id (the run id being the task
 id of the run that produced them), never through the task runner: a task's

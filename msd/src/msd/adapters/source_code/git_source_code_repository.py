@@ -4,7 +4,10 @@
 
 A Makefile is only considered "found" if it also contains one of the
 configured include patterns (config.ini's makefile_include_patterns), not
-merely if a file named Makefile exists.
+merely if a file named Makefile exists. Both mandatory files are discovered
+recursively — the same rule the build runner and the analyzer apply — so the
+records this writes agree with the files the run actually read, however
+deeply they are nested.
 """
 
 from __future__ import annotations
@@ -18,9 +21,8 @@ from pathlib import Path
 from typing import List, Tuple
 
 from msd.adapters.source_code.mandatory_file_catalog import (
-    MAKEFILE_RELATIVE_PATH,
+    find_valid_makefile,
     get_mandatory_files,
-    makefile_has_valid_include,
 )
 from msd.domain.acquired_file import AcquiredFile
 from msd.domain.data_source import DataSourceConfig
@@ -120,33 +122,45 @@ class GitSourceCodeRepository(ISourceCodeRepository):
     def scan_cloned_unit(self, unit: SoftwareUnitVersion, clone_path: Path) -> List[AcquiredFile]:
         """Collect the mandatory-file records from an already-cloned unit
         directory (no network access) — used by the generate step to reuse
-        previously cloned repositories."""
+        previously cloned repositories.
+
+        Discovery is recursive, on the same rule the run itself applies:
+        `find_valid_makefile` for the Makefile — the rule the build runner
+        uses to pick which Makefile to run — and the first `<unit>.xml`
+        under `src/` at any depth, the rule the analyzer uses to read the
+        topic manifest. Whatever this records as OK is, by construction, a
+        file the workflow actually read."""
         acquired: List[AcquiredFile] = []
         now = datetime.now()
-        for relative_path in get_mandatory_files(unit.unit_name):
-            file_path = clone_path / relative_path
-            if not file_path.is_file():
-                continue
-            try:
-                content = file_path.read_bytes()
-            except OSError as exc:
-                raise SourceRepoIntegrityError(f"Could not read '{relative_path}' for '{unit.unit_name}': {exc}") from exc
 
-            if relative_path == MAKEFILE_RELATIVE_PATH:
-                if not makefile_has_valid_include(content.decode("utf-8", errors="replace"), self._makefile_include_patterns):
-                    logger.debug("Makefile for '%s' lacks a configured include pattern; treating as not found.", unit.unit_name)
-                    continue
+        makefile_path = find_valid_makefile(clone_path, self._makefile_include_patterns)
+        if makefile_path is not None:
+            acquired.append(self._record_acquired(makefile_path, unit, now))
 
-            acquired.append(
-                AcquiredFile(
-                    unit_name=unit.unit_name,
-                    file_name=file_path.name,
-                    file_path=str(file_path),
-                    package_version=unit.version,
-                    updated_at=now,
-                )
-            )
+        src_path = clone_path / "src"
+        if src_path.is_dir():
+            # The analyzer reads matches[0] of exactly this glob, so the
+            # recorded file is the manifest the run parsed.
+            manifests = sorted(src_path.glob(f"**/{unit.unit_name}.xml"))
+            if manifests:
+                acquired.append(self._record_acquired(manifests[0], unit, now))
+
         return acquired
+
+    def _record_acquired(self, file_path: Path, unit: SoftwareUnitVersion, now: datetime) -> AcquiredFile:
+        """Read the file for integrity (req 16) and record it as acquired at
+        the path it was actually found."""
+        try:
+            file_path.read_bytes()
+        except OSError as exc:
+            raise SourceRepoIntegrityError(f"Could not read '{file_path}' for '{unit.unit_name}': {exc}") from exc
+        return AcquiredFile(
+            unit_name=unit.unit_name,
+            file_name=file_path.name,
+            file_path=str(file_path),
+            package_version=unit.version,
+            updated_at=now,
+        )
 
     def list_mandatory_files(self, unit_name: str) -> List[str]:
         return get_mandatory_files(unit_name)

@@ -13,9 +13,14 @@ from msd.domain.inventory import CandidateUnitVersion, SoftwareUnitVersion
 from msd.ports.config_management_repository import ConfigManagementAccessError
 
 
-def _components(tmp_path: Path, source_repo: FakeSourceCodeRepository = None, **config_repo_kwargs) -> Components:
+def _components(
+    tmp_path: Path,
+    source_repo: FakeSourceCodeRepository = None,
+    unit_versions: dict = None,
+    **config_repo_kwargs,
+) -> Components:
     config_repo = FakeConfigManagementRepository(
-        unit_versions={"1.0.0": [SoftwareUnitVersion("nav_app", "1.0.0")]},
+        unit_versions=unit_versions or {"1.0.0": [SoftwareUnitVersion("nav_app", "1.0.0")]},
         **config_repo_kwargs,
     )
     return Components(
@@ -33,6 +38,7 @@ def _run(
     version_id: str,
     produced_by: str = None,
     candidate: CandidateUnitVersion = None,
+    progress=None,
 ) -> dict:
     """One workflow run keyed by a task id, as the Celery task does."""
     return components.workflow().execute(
@@ -43,7 +49,16 @@ def _run(
         run_id=task_id,
         produced_by=produced_by,
         candidate=candidate,
+        progress=progress,
     ).to_dict()
+
+
+class _RecordingProgress:
+    def __init__(self):
+        self.calls = []
+
+    def report(self, percent: int, phase: str):
+        self.calls.append((percent, phase))
 
 
 def test_run_workflow_clones_and_generates(tmp_path: Path):
@@ -149,3 +164,56 @@ def test_run_workflow_isolates_run_dirs_per_task_id(tmp_path: Path):
     assert first_dir.parent == second_dir.parent
     assert (first_dir / "nav_app" / "Makefile").is_file()
     assert (second_dir / "nav_app" / "Makefile").is_file()
+
+
+def test_run_workflow_reports_overall_progress_per_work_unit(tmp_path: Path):
+    """The run's progress is its work units done over all of them: one unit
+    per unit per per-unit phase (clone, scan, analyze), plus one for
+    finalize — so one unit of inventory is four work units (D=4) and the
+    percent moves in 25% steps, always naming the phase being worked."""
+    components = _components(tmp_path)
+    progress = _RecordingProgress()
+
+    _run(components, "task-p1", "proj-1", "plat-1", "1.0.0", progress=progress.report)
+
+    assert progress.calls == [
+        (0, "clone"),
+        (25, "clone"),
+        (25, "scan"),
+        (50, "scan"),
+        (50, "analyze"),
+        (75, "analyze"),
+        (75, "finalize"),
+        (100, "finalize"),
+    ]
+
+
+def test_run_workflow_progress_scales_with_the_inventory(tmp_path: Path):
+    """Two units of inventory make seven work units (3N+1), so the same four
+    phases step the percent through thirds — and a run is only done when the
+    last work unit, finalize, is."""
+    components = _components(
+        tmp_path,
+        unit_versions={
+            "1.0.0": [
+                SoftwareUnitVersion("nav_app", "1.0.0"),
+                SoftwareUnitVersion("sensor_app", "1.0.0"),
+            ]
+        },
+    )
+    progress = _RecordingProgress()
+
+    _run(components, "task-p2", "proj-1", "plat-1", "1.0.0", progress=progress.report)
+
+    percents, phases = zip(*progress.calls)
+    assert percents == (0, 14, 28, 28, 42, 57, 57, 71, 85, 85, 100)
+    # The percent never moves backwards, and the run finishes complete.
+    assert all(b >= a for a, b in zip(percents, percents[1:]))
+    assert percents[-1] == 100
+    # Three per-unit steps each (start + one per unit), two for finalize.
+    assert (
+        phases.count("clone"),
+        phases.count("scan"),
+        phases.count("analyze"),
+        phases.count("finalize"),
+    ) == (3, 3, 3, 2)

@@ -92,9 +92,35 @@ def test_status_failure_with_empty_message_falls_back_to_repr():
     assert "ValueError" in status.error
 
 
+def test_status_started_carries_the_run_progress_in_info():
+    """A running task's published state meta (update_state's meta — the run's
+    progress) rides back as info, the non-terminal counterpart of result."""
+    status = _status(states.STARTED, {"percent": 42, "phase": "clone"})
+
+    assert status.state == "STARTED"
+    assert status.info == {"percent": 42, "phase": "clone"}
+    assert status.result is None
+    assert status.error is None
+
+
+def test_status_started_ignores_meta_that_is_not_a_dict():
+    status = _status(states.STARTED, "not-a-dict")
+
+    assert status.info is None
+
+
+def test_status_started_ignores_celerys_own_started_info():
+    """Celery publishes the worker's pid/hostname as the task's STARTED meta;
+    that is not the run's progress, so it must not surface as such."""
+    status = _status(states.STARTED, {"pid": 42, "hostname": "celery@host"})
+
+    assert status.info is None
+
+
 def test_status_non_ready_states_carry_no_payload():
     for state in (states.PENDING, states.STARTED):
         status = _status(state)
         assert status.state == state
         assert status.result is None
         assert status.error is None
+        assert status.info is None

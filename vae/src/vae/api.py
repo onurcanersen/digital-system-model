@@ -26,7 +26,7 @@ Flask endpoints:
   GET  /api/units/<unit_name>/versions                                 [login + source_code_repo connected]
   POST /api/msd/run   body {"project_id", "platform_id", "version_id",
                             "candidate"?: {"unit_name", "version"}}  [login + both data sources connected]
-  GET  /api/msd/tasks/<task_id>/output                                 [login required]
+  GET  /api/msd/tasks/<task_id>?after=<line>   task status + new output lines   [login required]
   POST /api/msd/tasks/<task_id>/cancel                                 [login required]
 
 Produced files are addressed by selection + run id (the run id being the task
@@ -40,12 +40,12 @@ The API host/port/session secret come from the [api] section of vae's config.ini
 
 from __future__ import annotations
 
+from datetime import timedelta
 import functools
-import json
 import logging
 import time
 
-from flask import Flask, Response, jsonify, render_template, request, send_file, session
+from flask import Flask, jsonify, render_template, request, send_file, session
 
 from msd.domain.data_source import SourceType
 from msd.ports.config_management_repository import ConfigManagementAccessError
@@ -70,42 +70,19 @@ _CANDIDATE_FIELDS = ("unit_name", "version")
 # deliberately: neither is a place to come back to.
 _RESUMABLE_VIEWS = ("sources", "select", "inventory", "files", "run", "model")
 
-# Run stream (SSE) pacing: how often a still-running task's output store and
-# task status are re-checked, the hard cap on one stream, and the grace window
-# after a run has ended. The stream carries the task's output lines, a `status`
-# event on every state change (plus a snapshot on connect/reconnect), and a
-# `ping` every PING_SECONDS of silence. The terminal `status` is the
-# terminator: the client closes the stream on it, and the server keeps the
-# connection open for TERMINAL_GRACE_SECONDS afterwards as a leak guard
-# (a client that vanished is detected on the next failed ping write) rather
-# than closing it itself — a server-side close in the same instant as the
-# final events lets proxies deliver the close before the bytes, which reads
-# to the client as a mid-run drop.
-#
-# A real run goes quiet for minutes at a time (source analysis logs once per
-# unit and nothing in between), and an SSE connection that carries no bytes
-# for that long is dropped by whatever sits on the path — without a FIN the
-# browser never fires `error`, so EventSource never reconnects and the run
-# card is stranded mid-run. So the stream says something on every ping
-# interval whether or not the task did: a named event rather than a `:`
-# comment, because the client watchdog has to be able to see it (comments
-# keep the socket warm but never reach JavaScript).
-_OUTPUT_STREAM_TICK_SECONDS = 0.5
-_OUTPUT_STREAM_PING_SECONDS = 15
-_OUTPUT_STREAM_MAX_SECONDS = 3600
-_OUTPUT_STREAM_TERMINAL_GRACE_SECONDS = 60
-_OUTPUT_STREAM_TERMINAL_PING_SECONDS = 5
-_OUTPUT_TERMINAL_STATES = ("SUCCESS", "FAILURE", "REVOKED")
-
 
 def _status_payload(status: TaskStatus) -> dict:
     """JSON payload for a task status — shared by the REST cancel endpoint
-    and the run stream's `status` events (a terminal one ends the run)."""
+    and the task-state endpoint the run card polls.
+    A non-terminal status carries the run's progress under `progress` when
+    the task has published any."""
     payload = {"task_id": status.task_id, "state": status.state}
     if status.result is not None:
         payload["result"] = status.result
     if status.error is not None:
         payload["error"] = status.error
+    if status.info is not None:
+        payload["progress"] = status.info
     return payload
 
 
@@ -139,6 +116,12 @@ def login_required(view):
 def create_app(components: Components = None) -> Flask:
     app = Flask(__name__)
     app.secret_key = get_config().api.secret_key
+    # A full browser close must not sever the session: the tracked run (and
+    # its output in Redis) is re-attached on reopen only if the session
+    # cookie — with the selection and conn_token it carries — survives. The
+    # lifetime matches the run-tracking window, so a session never outlives
+    # the longest run it can still point at.
+    app.permanent_session_lifetime = timedelta(seconds=RESULT_EXPIRES_SECONDS)
 
     if components is None:
         components = load_components()
@@ -201,6 +184,10 @@ def create_app(components: Components = None) -> Flask:
         user = components.authenticate_user().execute(body["username"], body["password"])
         if user is None:
             return jsonify({"error": "invalid username or password"}), 401
+        # Persistent: the cookie outlives a full browser close, so reopening
+        # the browser resumes this session — the run it tracks included —
+        # rather than starting over at sign-in.
+        session.permanent = True
         session["username"] = user.username
         session["role"] = user.role.value
         return jsonify({
@@ -496,76 +483,34 @@ def create_app(components: Components = None) -> Flask:
             return jsonify({"error": str(exc)}), 502
         return jsonify(_status_payload(status))
 
-    @app.route("/api/msd/tasks/<task_id>/output")
+    @app.route("/api/msd/tasks/<task_id>")
     @login_required
-    def api_msd_task_output(task_id):
-        # A client that reopens the stream itself (its own re-dial after a
-        # drop) says where to resume in the query string — only the browser's
-        # native reconnect would set Last-Event-ID, and the client closes the
-        # source on error so it no longer happens. Resuming at the line after
-        # the id the client last received means nothing it already has is
-        # replayed.
-        resume = request.args.get("last_event_id")
+    def api_msd_task_state(task_id):
+        """One poll of the run card: the task's status plus the output lines
+        the client has not seen yet, in one response. The UI polls this every
+        second or so and stops when the state goes terminal, so nothing here
+        stays open — a poll is a short request, and the endpoint doubles as
+        the machine-readable status channel for automation clients (SRS
+        DSM-VAE req 50).
+
+        `after` is the index of the last line the client holds, so the answer
+        carries only what is new; a poll without one (a re-attach, whose
+        console was reset) replays the stored lines from the top. Clamped: a
+        malformed or negative cursor reads as "hold nothing" rather than
+        slicing from the end of the log."""
         try:
-            # Clamped: a negative id would slice from the end of the log and
-            # replay the tail as if it were the head.
-            cursor = max(0, int(resume) + 1)
+            after = int(request.args.get("after"))
         except (TypeError, ValueError):
-            cursor = 0
-
-        def stream():
-            nonlocal cursor
-            now = time.monotonic()
-            deadline = now + _OUTPUT_STREAM_MAX_SECONDS
-            last_written = now
-            last_state = None
-            terminal_at = None
-            while time.monotonic() < deadline:
-                try:
-                    lines = components.task_output_store.lines(task_id)
-                    # The state is already known terminal in the grace phase,
-                    # so the task runner is only asked while the run is going.
-                    if terminal_at is None:
-                        status = components.msd_task_runner.status(task_id)
-                except Exception:
-                    # A store/status blip skips this tick; the stream stays up.
-                    time.sleep(_OUTPUT_STREAM_TICK_SECONDS)
-                    continue
-                # No `id:` on status/ping events — none of them is resumable,
-                # and a reconnect gets a fresh snapshot of the state anyway
-                # (last_state starts None).
-                for index, line in enumerate(lines[cursor:], start=cursor):
-                    yield f"id: {index}\ndata: {line}\n\n"
-                    cursor = index + 1
-                    last_written = time.monotonic()
-                if terminal_at is None and status.state != last_state:
-                    last_state = status.state
-                    yield f"event: status\ndata: {json.dumps(_status_payload(status))}\n\n"
-                    last_written = time.monotonic()
-                    if status.state in _OUTPUT_TERMINAL_STATES:
-                        # The terminal status is the terminator: the client
-                        # closes on it. The server does not close here — it
-                        # keeps the stream open (lines only, faster pings)
-                        # until the client does or the grace elapses, so the
-                        # final events always ride a connection nobody is
-                        # tearing down.
-                        terminal_at = time.monotonic()
-                if terminal_at is not None:
-                    if time.monotonic() - last_written >= _OUTPUT_STREAM_TERMINAL_PING_SECONDS:
-                        yield "event: ping\ndata: {}\n\n"
-                        last_written = time.monotonic()
-                    if time.monotonic() - terminal_at >= _OUTPUT_STREAM_TERMINAL_GRACE_SECONDS:
-                        return
-                elif time.monotonic() - last_written >= _OUTPUT_STREAM_PING_SECONDS:
-                    yield "event: ping\ndata: {}\n\n"
-                    last_written = time.monotonic()
-                time.sleep(_OUTPUT_STREAM_TICK_SECONDS)
-
-        return Response(
-            stream(),
-            mimetype="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-        )
+            after = -1
+        try:
+            status = components.msd_task_runner.status(task_id)
+            lines = components.task_output_store.lines_since(task_id, after + 1)
+        except Exception as exc:
+            logger.warning("msd/tasks/%s: state read failed: %s", task_id, exc)
+            return jsonify({"error": str(exc)}), 502
+        payload = _status_payload(status)
+        payload["lines"] = lines
+        return jsonify(payload)
 
     return app
 
